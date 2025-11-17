@@ -125,28 +125,52 @@ df_ans["ESTADO_FENIX"] = df_ans.apply(calcular_estado_fenix, axis=1)
 print("🧩 Columna ESTADO_FENIX actualizada correctamente (sin tocar formato).")
 
 # ============================================================
-# 5️⃣ MOVER PEDIDOS CERRADOS AL REPOSITORIO
+# 5️⃣ MOVER PEDIDOS CERRADOS AL REPOSITORIO (SIN DUPLICAR COLUMNAS)
 # ============================================================
 cerrados = df_ans[df_ans["ESTADO_FENIX"] == "CERRADO"].copy()
+
 if not cerrados.empty:
     print(f"📦 {len(cerrados)} pedidos cerrados serán movidos al repositorio histórico.")
+
+    # ➤ Columnas que DEBEN quedar finalmente en el repositorio
+    columnas_repo = [
+        "PEDIDO", "PRODUCTO_ID", "TIPO_TRABAJO", "TIPO_ELEMENTO_ID",
+        "FECHA_RECIBIDO", "FECHA_INICIO_ANS", "CLIENTEID", "NOMBRE_CLIENTE",
+        "TELEFONO_CONTACTO", "CELULAR_CONTACTO", "DIRECCION",
+        "ESTADO_FENIX"
+    ]
+
+    # ➤ Filtrar solo las columnas que existan realmente
+    columnas_existentes = [c for c in columnas_repo if c in cerrados.columns]
+    cerrados = cerrados[columnas_existentes]
+
+    # ➤ Cargar repositorio (si existe)
     if ruta_repo.exists():
         repo = pd.read_excel(ruta_repo, dtype=str)
+
+        # Asegurar que el repositorio tenga SOLO estas columnas
+        columnas_repo_existentes = [c for c in columnas_repo if c in repo.columns]
+        repo = repo[columnas_repo_existentes]
+
+        # Unir sin duplicar columnas NUNCA
         repo = pd.concat([repo, cerrados], ignore_index=True)
+
+        # Eliminar duplicados por PEDIDO
         repo.drop_duplicates(subset=["PEDIDO"], keep="last", inplace=True)
+
     else:
         repo = cerrados.copy()
-    # Eliminar columnas no deseadas antes de guardar en el repositorio
-    columnas_eliminar = ["AREA_OPERATIVA", "SUBZONA", "TECNICO_EJECUTA"]
 
-    for col in columnas_eliminar:
-        if col in repo.columns:
-            del repo[col]
-    
+    # Guardar limpio y ordenado
     repo.to_excel(ruta_repo, index=False)
+    print("💾 Repositorio actualizado SIN duplicar columnas.")
+
+    # Eliminar CERRADO del archivo principal
     df_ans = df_ans[df_ans["ESTADO_FENIX"] != "CERRADO"]
+
 else:
     print("ℹ️ No se encontraron pedidos cerrados para mover.")
+
 
 # ============================================================
 # 6️⃣ GUARDAR RESULTADOS (ACTUALIZA SOLO COLUMNA ESTADO_FENIX)
@@ -198,10 +222,19 @@ col = col_estado
 max_row = ws.max_row
 rango = f"{ws.cell(2, col).coordinate}:{ws.cell(max_row, col).coordinate}"
 
+from openpyxl.styles import PatternFill
+from openpyxl.styles.differential import DifferentialStyle
+from openpyxl.formatting.rule import Rule
+from openpyxl.utils import get_column_letter
+
+col_letra = get_column_letter(col_estado)
+
 def regla_contiene(texto, color_hex):
-    regla = Rule(type="containsText", operator="containsText", text=texto)
-    regla.formula = [f'NOT(ISERROR(SEARCH("{texto}",{ws.cell(2, col).coordinate})))']
-    regla.dxf = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
+    fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
+    dxf = DifferentialStyle(fill=fill)
+
+    regla = Rule(type="containsText", operator="containsText", text=texto, dxf=dxf)
+    regla.formula = [f'NOT(ISERROR(SEARCH("{texto}",${col_letra}2)))']
     return regla
 
 # 🟩 Verde
