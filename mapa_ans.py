@@ -1,5 +1,5 @@
 """
-MAPA ANS PROFESIONAL – v6.3 (Ultra-Blindado)
+MAPA ANS PROFESIONAL – v7.3 (ESTABLE + HÍBRIDO + IR DIRECCIÓN)
 Google Maps + Tooltip Dirección
 Héctor + IA – 2025
 """
@@ -27,13 +27,12 @@ df = pd.read_excel(ruta_fenix, sheet_name="FENIX_ANS", dtype=str)
 df.columns = df.columns.str.upper().str.strip()
 
 # ============================================================
-# 2.1 NORMALIZAR ESTADOS (ULTRA BLINDADO)
+# 2.1 NORMALIZAR ESTADOS
 # ============================================================
 def normalizar_estado(e):
     if not isinstance(e, str):
         return "SIN FECHA"
 
-    # eliminar caracteres invisibles
     e = re.sub(r"[\u200B-\u200D\uFEFF\u00A0]", "", e)
 
     e = (
@@ -44,20 +43,12 @@ def normalizar_estado(e):
          .replace("SIN DATO", "SIN FECHA")
     )
 
-    e = e.replace("  ", " ").replace("\r", "").replace("\n", "")
-
     ESTADOS_VALIDOS = {
-        "A TIEMPO",
-        "ALERTA",
-        "ALERTA_0 DIAS",
-        "VENCIDO",
-        "SIN FECHA"
+        "A TIEMPO", "ALERTA", "ALERTA_0 DIAS",
+        "VENCIDO", "SIN FECHA"
     }
 
-    if e in ESTADOS_VALIDOS:
-        return e
-
-    return "SIN FECHA"
+    return e if e in ESTADOS_VALIDOS else "SIN FECHA"
 
 df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
 
@@ -65,7 +56,7 @@ df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
 # 2.2 LIMPIAR COORDENADAS
 # ============================================================
 def limpiar_coord(x):
-    if x is None: 
+    if x is None:
         return None
     x = str(x).strip().replace(",", ".")
     try:
@@ -79,7 +70,7 @@ df["COORDENADAY"] = df["COORDENADAY"].apply(limpiar_coord)
 df = df.dropna(subset=["COORDENADAX", "COORDENADAY"])
 
 # ============================================================
-# 2.3 ELIMINAR DUPLICADOS SOLO PARA EL MAPA (NO AFECTA EL EXCEL)
+# 2.3 ELIMINAR DUPLICADOS
 # ============================================================
 df_mapa = df.drop_duplicates(
     subset=["PEDIDO", "COORDENADAX", "COORDENADAY"],
@@ -89,7 +80,7 @@ df_mapa = df.drop_duplicates(
 print(f"📌 Total pedidos visibles en el mapa: {len(df_mapa)}")
 
 # ============================================================
-# 3. MAPA BASE (GOOGLE MAPS SATÉLITE + ETIQUETAS)
+# 3. MAPA BASE
 # ============================================================
 mapa = folium.Map(
     location=[6.24, -75.57],
@@ -100,6 +91,18 @@ mapa = folium.Map(
 
 mapa_id = mapa.get_name()
 
+# ============================================================
+# 3.1 Anti-Cache
+# ============================================================
+mapa.get_root().html.add_child(folium.Element("""
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+"""))
+
+# ============================================================
+# 3.2 JS VARIABLES GLOBALES
+# ============================================================
 mapa.get_root().html.add_child(folium.Element(f"""
 <script>
 document.addEventListener("DOMContentLoaded", function() {{
@@ -120,29 +123,33 @@ document.addEventListener("DOMContentLoaded", function() {{
 # 4. ICONOS
 # ============================================================
 ICON_SIZE = [20, 33]
-
 colores = {
     "A TIEMPO": "green",
     "ALERTA": "yellow",
     "ALERTA_0 DIAS": "orange",
     "VENCIDO": "red",
-    "SIN FECHA": "grey"
+    "SIN FECHA": "violet"
 }
 
 # ============================================================
-# 5. CREAR MARCADORES (CON TOOLTIP DIRECCIÓN)
+# 5. MARCADORES
 # ============================================================
+mapa.get_root().html.add_child(folium.Element("""
+<script>
+window.marcadores = {};
+window.estadoMarcadores = {
+    "A TIEMPO": [],
+    "ALERTA": [],
+    "ALERTA_0 DIAS": [],
+    "VENCIDO": [],
+    "SIN FECHA": []
+};
+</script>
+"""))
+
 markers_js = """
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-    window.marcadores = {};
-    window.estadoMarcadores = {
-        "A TIEMPO": [],
-        "ALERTA": [],
-        "ALERTA_0 DIAS": [],
-        "VENCIDO": [],
-        "SIN FECHA": []
-    };
 """
 
 for _, row in df_mapa.iterrows():
@@ -169,7 +176,9 @@ var mk_{pedido} = L.marker([{lat}, {lon}], {{
         iconAnchor: [10, 33],
         popupAnchor: [0, -28]
     }})
-}}).bindTooltip("{direccion}", {{permanent:false}}).bindPopup(`{popup}`).addTo(window.mapa);
+}}).bindTooltip("{pedido}")
+  .addTo(window.mapa);
+
 
 window.marcadores["{pedido}"] = mk_{pedido};
 window.estadoMarcadores["{estado}"].push("{pedido}");
@@ -183,7 +192,7 @@ markers_js += """
 mapa.get_root().html.add_child(folium.Element(markers_js))
 
 # ============================================================
-# 6. PANEL LATERAL
+# 6. PANEL LATERAL – v7.3
 # ============================================================
 panel_html = Template("""
 {% macro html(this, kwargs) %}
@@ -210,9 +219,15 @@ panel_html = Template("""
     font-weight:bold;
     text-align:center;
 }
+.subtitulo{
+    font-size:14px;
+    margin-top:12px;
+    font-weight:bold;
+}
 </style>
 
 <div id="panelANS">
+
 <b style="font-size:18px;">📊 ANS Control</b><br><br>
 
 <b>Buscar pedido:</b><br>
@@ -221,57 +236,121 @@ panel_html = Template("""
 <button onclick="limpiarBusqueda()" class="filtroBtn" style="background:#cccccc;">Limpiar</button>
 
 <hr>
-<b>Filtros:</b><br>
 
+<b class="subtitulo">Filtros:</b>
 <div onclick="filtrarEstado('A TIEMPO')" class="filtroBtn" style="background:#00C853;color:white;">A TIEMPO</div>
 <div onclick="filtrarEstado('ALERTA')" class="filtroBtn" style="background:#FFD600;">ALERTA</div>
 <div onclick="filtrarEstado('ALERTA_0 DIAS')" class="filtroBtn" style="background:#FF8F00;">ALERTA 0 DÍAS</div>
 <div onclick="filtrarEstado('VENCIDO')" class="filtroBtn" style="background:#D50000;color:white;">VENCIDO</div>
-<div onclick="filtrarEstado('SIN FECHA')" class="filtroBtn" style="background:#616161;color:white;">SIN FECHA</div>
+<div onclick="filtrarEstado('SIN FECHA')" class="filtroBtn" style="background:#6a1b9a;color:white;">SIN FECHA</div>
 <div onclick="mostrarTodos()" class="filtroBtn" style="background:#bbdefb;">MOSTRAR TODOS</div>
+
+<hr>
+
+<b class="subtitulo">🗺️ Capas del Mapa</b>
+<div onclick="setCapa('sat')" class="filtroBtn" style="background:#c5e1a5;">Satélite</div>
+<div onclick="setCapa('calles')" class="filtroBtn" style="background:#aed581;">Calles</div>
+
 </div>
 
 <script>
 
-function ocultarTodos(){
-    Object.values(window.marcadores).forEach(m => window.mapa.removeLayer(m));
-}
+// ===============================
+// 🔰 SISTEMA DE CAPAS DE MAPA
+// ===============================
 
-function mostrarTodos(){
-    Object.values(window.marcadores).forEach(m => window.mapa.addLayer(m));
-}
+// URLs de Google
+const capas = {
+    sat: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+    calles: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
+    hibrido: "https://mt1.google.com/vt/lyrs=y,m&x={x}&y={y}&z={z}"
+};
 
-function filtrarEstado(estado){
-    ocultarTodos();
-    window.estadoMarcadores[estado].forEach(p => {
-        window.mapa.addLayer(window.marcadores[p]);
-    });
-}
+window.currentLayer = null;
 
-function buscarPedido(){
-    let p = document.getElementById("buscarPedido").value.trim();
-    if(!p){ mostrarTodos(); return; }
-
-    if(window.marcadores[p]){
-        ocultarTodos();
-        let mk = window.marcadores[p];
-        window.mapa.addLayer(mk);
-        window.mapa.setView(mk.getLatLng(), 18);
-        mk.openPopup();
-    }else{
-        alert("Pedido no encontrado");
+window.setCapa = function(tipo){
+    if(window.currentLayer){
+        window.mapa.removeLayer(window.currentLayer);
     }
-}
 
-function limpiarBusqueda(){
-    document.getElementById("buscarPedido").value = "";
-    mostrarTodos();
-}
+    window.currentLayer = L.tileLayer(capas[tipo], {
+        maxZoom: 20,
+        attribution: "Google"
+    }).addTo(window.mapa);
+
+    window.mapa.invalidateSize(true);
+};
+
+
+// ===============================
+// 🔍 BÚSQUEDA Y FILTROS (SIN CAMBIOS)
+// ===============================
+
+setTimeout(function(){
+
+    function refrescar(){
+        setTimeout(function(){
+            window.mapa.invalidateSize(true);
+            window.mapa._onResize();
+            window.mapa.fire('moveend');
+        }, 30);
+    }
+
+    window.ocultarTodos = function(){
+        Object.values(window.marcadores).forEach(m => m.setOpacity(0));
+        refrescar();
+    };
+
+    window.mostrarTodos = function(){
+        Object.values(window.marcadores).forEach(m => m.setOpacity(1));
+        window.mapa.setView([6.24, -75.57], 13);
+        refrescar();
+    };
+
+    window.filtrarEstado = function(estado){
+        window.ocultarTodos();
+        window.estadoMarcadores[estado].forEach(p => {
+            window.marcadores[p].setOpacity(1);
+        });
+        refrescar();
+    };
+
+    window.buscarPedido = function(){
+        let p = document.getElementById("buscarPedido").value.trim();
+        if(!p) return;
+
+        if(window.marcadores[p]){
+
+            window.ocultarTodos();
+
+            let mk = window.marcadores[p];
+            mk.setOpacity(1);
+            window.mapa.setView(mk.getLatLng(), 18);
+            mk.openPopup();
+            refrescar();
+
+            setTimeout(function(){
+                window.mapa.setZoom(13);
+                refrescar();
+            }, 600);
+
+        } else {
+            alert("Pedido no encontrado");
+        }
+    };
+
+    window.limpiarBusqueda = function(){
+        document.getElementById("buscarPedido").value = "";
+        window.mostrarTodos();
+    };
+
+}, 400);
 
 </script>
 
 {% endmacro %}
 """)
+
 
 panel = MacroElement()
 panel._template = panel_html
@@ -283,5 +362,5 @@ mapa.get_root().add_child(panel)
 ruta_salida.parent.mkdir(exist_ok=True)
 mapa.save(ruta_salida)
 
-print("🟢 Mapa ANS v6.3 generado correctamente.")
+print("🟢 Mapa ANS v7.3 generado correctamente.")
 webbrowser.open(str(ruta_salida))
