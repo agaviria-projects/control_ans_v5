@@ -72,7 +72,8 @@ df_mapa = df.drop_duplicates(
     keep="first"
 )
 
-print(f"📌 Total pedidos visibles en el mapa: {len(df_mapa)}")
+print(f"[INFO] Total pedidos visibles en el mapa: {len(df_mapa)}")
+
 
 # ============================================================
 # 3. MAPA BASE (SATÉLITE)
@@ -156,7 +157,7 @@ markers_js += """
 mapa.get_root().html.add_child(folium.Element(markers_js))
 
 # ============================================================
-# 6. PANEL LATERAL (CON MODAL INTEGRADO)
+# 6. PANEL LATERAL + MODAL
 # ============================================================
 panel_html = Template("""
 {% macro html(this, kwargs) %}
@@ -189,7 +190,6 @@ panel_html = Template("""
 
 <div id="panelANS">
 
-<!-- 🔔 MODAL ELEGANTE -->
 <div id="modalError"
      style="display:none; position:fixed;
      top:50%; left:50%; transform:translate(-50%, -50%);
@@ -225,7 +225,7 @@ panel_html = Template("""
 </div>
 
 <script>
-// ======== CAPAS GOOGLE ========
+// ======= CAPAS GOOGLE =======
 const capas = {
     sat: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
     calles: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
@@ -239,7 +239,7 @@ window.setCapa = function(tipo){
     window.mapa.invalidateSize(true);
 };
 
-// ======== MODAL ========
+// ======= MODAL =======
 function mostrarModal(msg){
     let m = document.getElementById("modalError");
     m.style.display = "block";
@@ -258,15 +258,14 @@ function cerrarModal(){
     document.getElementById("modalError").style.display = "none";
 }
 
-// ======== FILTROS Y BÚSQUEDA ========
+// ======= FILTROS Y BÚSQUEDA =======
 setTimeout(function(){
 
-    function refrescar(){
-        setTimeout(()=>{ window.mapa.invalidateSize(true); }, 30);
-    }
+    function refrescar(){ setTimeout(()=> window.mapa.invalidateSize(true), 30); }
 
     window.ocultarTodos = ()=>{ 
-        Object.values(window.marcadores).forEach(m=>m.setOpacity(0)); refrescar(); 
+        Object.values(window.marcadores).forEach(m=>m.setOpacity(0)); 
+        refrescar(); 
     };
 
     window.mostrarTodos = ()=>{
@@ -321,5 +320,5 @@ mapa.get_root().add_child(panel)
 ruta_salida.parent.mkdir(exist_ok=True)
 mapa.save(ruta_salida)
 
-print("🟢 Mapa ANS v7.4 generado correctamente.")
+print("Mapa ANS generado correctamente.")
 webbrowser.open(str(ruta_salida))

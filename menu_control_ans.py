@@ -206,19 +206,58 @@ def ejecutar_informe():
             restaurar_boton(btn_informe, color_original)
 
     threading.Thread(target=tarea, daemon=True).start()
+def generar_mapa():
+    """Genera el mapa ANS antes de abrirlo"""
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        ruta_script = os.path.join(base_dir, "mapa_ans.py")
+
+        if not os.path.exists(ruta_script):
+            mbox.showerror("Mapa ANS", "❌ No se encontró mapa_ans.py")
+            return False
+
+        proceso = subprocess.Popen(
+            [sys.executable, ruta_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8"
+        )
+
+        for linea in iter(proceso.stdout.readline, ''):
+            log_text.insert(tk.END, linea)
+            log_text.see(tk.END)
+
+        proceso.wait()
+        return proceso.returncode == 0
+
+    except Exception as e:
+        mbox.showerror("Mapa ANS", f"Error al generar el mapa: {e}")
+        return False
 
 # ------------------------------------------------------------
 # FUNCIÓN: ABRIR MAPA
 # ------------------------------------------------------------
 def abrir_mapa():
+    """Genera el mapa ANS y lo abre actualizado"""
     try:
+        log_text.insert(tk.END, "\n🔄 Generando VISOR GEOGRÁFICO ANS...\n", "info")
+        log_text.see(tk.END)
+
+        ok = generar_mapa()
+
+        if not ok:
+            mbox.showerror("Mapa ANS", "❌ Error generando mapa ANS.")
+            return
+
         ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), RUTA_MAPA)
+
         if not os.path.exists(ruta):
-            mbox.showerror("VISOR GEOGRÁFICO ANS", "❌ El archivo mapa_ans.html no existe.")
+            mbox.showerror("Mapa ANS", "❌ No se generó mapa_ans.html")
             return
 
         os.startfile(ruta)
-        log_text.insert(tk.END, "\n🗺️ Abriendo VISOR GEOGRÁFICO ANS...\n", "info")
+        log_text.insert(tk.END, "🗺️ Mapa actualizado y abierto correctamente.\n", "success")
 
     except Exception as e:
         mbox.showerror("Error", f"No se pudo abrir el mapa: {e}")
