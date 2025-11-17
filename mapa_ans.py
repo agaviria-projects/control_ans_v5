@@ -1,5 +1,6 @@
 """
-MAPA ANS PROFESIONAL – v6.2 (Blindado)
+MAPA ANS PROFESIONAL – v6.3 (Ultra-Blindado)
+Google Maps + Tooltip Dirección
 Héctor + IA – 2025
 """
 
@@ -8,6 +9,7 @@ import folium
 from branca.element import Template, MacroElement
 from pathlib import Path
 import webbrowser
+import re
 
 # ============================================================
 # 1. RUTAS
@@ -24,15 +26,46 @@ ruta_salida = base_path / "data_output" / "mapa_ans.html"
 df = pd.read_excel(ruta_fenix, sheet_name="FENIX_ANS", dtype=str)
 df.columns = df.columns.str.upper().str.strip()
 
-for col in ["PEDIDO", "ESTADO", "COORDENADAX", "COORDENADAY"]:
-    if col not in df.columns:
-        raise ValueError(f"❌ Falta columna '{col}' en FENIX_ANS.xlsx")
+# ============================================================
+# 2.1 NORMALIZAR ESTADOS (ULTRA BLINDADO)
+# ============================================================
+def normalizar_estado(e):
+    if not isinstance(e, str):
+        return "SIN FECHA"
+
+    # eliminar caracteres invisibles
+    e = re.sub(r"[\u200B-\u200D\uFEFF\u00A0]", "", e)
+
+    e = (
+        e.upper().strip()
+         .replace("Í", "I")
+         .replace(" 0 DIAS", "_0 DIAS")
+         .replace("0 DIAS", "_0 DIAS")
+         .replace("SIN DATO", "SIN FECHA")
+    )
+
+    e = e.replace("  ", " ").replace("\r", "").replace("\n", "")
+
+    ESTADOS_VALIDOS = {
+        "A TIEMPO",
+        "ALERTA",
+        "ALERTA_0 DIAS",
+        "VENCIDO",
+        "SIN FECHA"
+    }
+
+    if e in ESTADOS_VALIDOS:
+        return e
+
+    return "SIN FECHA"
+
+df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
 
 # ============================================================
-# 2.1 LIMPIAR COORDENADAS
+# 2.2 LIMPIAR COORDENADAS
 # ============================================================
 def limpiar_coord(x):
-    if x is None:
+    if x is None: 
         return None
     x = str(x).strip().replace(",", ".")
     try:
@@ -45,16 +78,24 @@ df["COORDENADAY"] = df["COORDENADAY"].apply(limpiar_coord)
 
 df = df.dropna(subset=["COORDENADAX", "COORDENADAY"])
 
-print(f"📌 Total pedidos cargados: {len(df)}")
+# ============================================================
+# 2.3 ELIMINAR DUPLICADOS SOLO PARA EL MAPA (NO AFECTA EL EXCEL)
+# ============================================================
+df_mapa = df.drop_duplicates(
+    subset=["PEDIDO", "COORDENADAX", "COORDENADAY"],
+    keep="first"
+)
+
+print(f"📌 Total pedidos visibles en el mapa: {len(df_mapa)}")
 
 # ============================================================
-# 3. MAPA BASE (SATELITAL)
+# 3. MAPA BASE (GOOGLE MAPS SATÉLITE + ETIQUETAS)
 # ============================================================
 mapa = folium.Map(
     location=[6.24, -75.57],
-    zoom_start=12,
-    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attr="Esri Satellite"
+    zoom_start=13,
+    tiles="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+    attr="Google"
 )
 
 mapa_id = mapa.get_name()
@@ -76,7 +117,7 @@ document.addEventListener("DOMContentLoaded", function() {{
 """))
 
 # ============================================================
-# 4. ICONOS PEQUEÑOS
+# 4. ICONOS
 # ============================================================
 ICON_SIZE = [20, 33]
 
@@ -89,25 +130,32 @@ colores = {
 }
 
 # ============================================================
-# 5. CREAR MARCADORES
+# 5. CREAR MARCADORES (CON TOOLTIP DIRECCIÓN)
 # ============================================================
 markers_js = """
 <script>
 document.addEventListener("DOMContentLoaded", function() {
+    window.marcadores = {};
+    window.estadoMarcadores = {
+        "A TIEMPO": [],
+        "ALERTA": [],
+        "ALERTA_0 DIAS": [],
+        "VENCIDO": [],
+        "SIN FECHA": []
+    };
 """
 
-for _, row in df.iterrows():
+for _, row in df_mapa.iterrows():
     pedido = row["PEDIDO"]
     estado = row["ESTADO"]
     lat = row["COORDENADAY"]
     lon = row["COORDENADAX"]
-
-    direccion = row["DIRECCION"] if "DIRECCION" in df.columns else ""
+    direccion = row["DIRECCION"] if "DIRECCION" in df.columns else "SIN DIRECCIÓN"
 
     popup = f"""
 <b>PEDIDO:</b> {pedido}<br>
 <b>ESTADO:</b> {estado}<br>
-<b>DIRECCIÓN:</b> {direccion if direccion else "No disponible"}
+<b>DIRECCIÓN:</b> {direccion}
 """
 
     color = colores.get(estado, "grey")
@@ -121,7 +169,7 @@ var mk_{pedido} = L.marker([{lat}, {lon}], {{
         iconAnchor: [10, 33],
         popupAnchor: [0, -28]
     }})
-}}).bindPopup(`{popup}`).addTo(window.mapa);
+}}).bindTooltip("{direccion}", {{permanent:false}}).bindPopup(`{popup}`).addTo(window.mapa);
 
 window.marcadores["{pedido}"] = mk_{pedido};
 window.estadoMarcadores["{estado}"].push("{pedido}");
@@ -203,6 +251,7 @@ function filtrarEstado(estado){
 function buscarPedido(){
     let p = document.getElementById("buscarPedido").value.trim();
     if(!p){ mostrarTodos(); return; }
+
     if(window.marcadores[p]){
         ocultarTodos();
         let mk = window.marcadores[p];
@@ -234,5 +283,5 @@ mapa.get_root().add_child(panel)
 ruta_salida.parent.mkdir(exist_ok=True)
 mapa.save(ruta_salida)
 
-print("🟢 Mapa ANS v6.2 generado correctamente.")
+print("🟢 Mapa ANS v6.3 generado correctamente.")
 webbrowser.open(str(ruta_salida))
