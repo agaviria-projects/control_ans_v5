@@ -1,6 +1,6 @@
 """
-MAPA ANS PROFESIONAL – v7.3 (ESTABLE + HÍBRIDO + IR DIRECCIÓN)
-Google Maps + Tooltip Dirección
+MAPA ANS PROFESIONAL – v7.4 (ULTRA-ESTABLE)
+Google Maps + Panel ANS + Modal Elegante
 Héctor + IA – 2025
 """
 
@@ -34,20 +34,15 @@ def normalizar_estado(e):
         return "SIN FECHA"
 
     e = re.sub(r"[\u200B-\u200D\uFEFF\u00A0]", "", e)
-
     e = (
         e.upper().strip()
-         .replace("Í", "I")
-         .replace(" 0 DIAS", "_0 DIAS")
-         .replace("0 DIAS", "_0 DIAS")
-         .replace("SIN DATO", "SIN FECHA")
+        .replace("Í", "I")
+        .replace(" 0 DIAS", "_0 DIAS")
+        .replace("0 DIAS", "_0 DIAS")
+        .replace("SIN DATO", "SIN FECHA")
     )
 
-    ESTADOS_VALIDOS = {
-        "A TIEMPO", "ALERTA", "ALERTA_0 DIAS",
-        "VENCIDO", "SIN FECHA"
-    }
-
+    ESTADOS_VALIDOS = {"A TIEMPO", "ALERTA", "ALERTA_0 DIAS", "VENCIDO", "SIN FECHA"}
     return e if e in ESTADOS_VALIDOS else "SIN FECHA"
 
 df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
@@ -58,7 +53,7 @@ df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
 def limpiar_coord(x):
     if x is None:
         return None
-    x = str(x).strip().replace(",", ".")
+    x = str(x).replace(",", ".").strip()
     try:
         return float(x)
     except:
@@ -80,7 +75,7 @@ df_mapa = df.drop_duplicates(
 print(f"📌 Total pedidos visibles en el mapa: {len(df_mapa)}")
 
 # ============================================================
-# 3. MAPA BASE
+# 3. MAPA BASE (SATÉLITE)
 # ============================================================
 mapa = folium.Map(
     location=[6.24, -75.57],
@@ -92,16 +87,7 @@ mapa = folium.Map(
 mapa_id = mapa.get_name()
 
 # ============================================================
-# 3.1 Anti-Cache
-# ============================================================
-mapa.get_root().html.add_child(folium.Element("""
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-<meta http-equiv="Pragma" content="no-cache" />
-<meta http-equiv="Expires" content="0" />
-"""))
-
-# ============================================================
-# 3.2 JS VARIABLES GLOBALES
+# 3.1 Variables JS Globales
 # ============================================================
 mapa.get_root().html.add_child(folium.Element(f"""
 <script>
@@ -134,19 +120,6 @@ colores = {
 # ============================================================
 # 5. MARCADORES
 # ============================================================
-mapa.get_root().html.add_child(folium.Element("""
-<script>
-window.marcadores = {};
-window.estadoMarcadores = {
-    "A TIEMPO": [],
-    "ALERTA": [],
-    "ALERTA_0 DIAS": [],
-    "VENCIDO": [],
-    "SIN FECHA": []
-};
-</script>
-"""))
-
 markers_js = """
 <script>
 document.addEventListener("DOMContentLoaded", function() {
@@ -157,13 +130,6 @@ for _, row in df_mapa.iterrows():
     estado = row["ESTADO"]
     lat = row["COORDENADAY"]
     lon = row["COORDENADAX"]
-    direccion = row["DIRECCION"] if "DIRECCION" in df.columns else "SIN DIRECCIÓN"
-
-    popup = f"""
-<b>PEDIDO:</b> {pedido}<br>
-<b>ESTADO:</b> {estado}<br>
-<b>DIRECCIÓN:</b> {direccion}
-"""
 
     color = colores.get(estado, "grey")
 
@@ -173,12 +139,10 @@ var mk_{pedido} = L.marker([{lat}, {lon}], {{
         iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-{color}.png",
         shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
         iconSize: [{ICON_SIZE[0]}, {ICON_SIZE[1]}],
-        iconAnchor: [10, 33],
-        popupAnchor: [0, -28]
+        iconAnchor: [10, 33], popupAnchor: [0, -28]
     }})
 }}).bindTooltip("{pedido}")
   .addTo(window.mapa);
-
 
 window.marcadores["{pedido}"] = mk_{pedido};
 window.estadoMarcadores["{estado}"].push("{pedido}");
@@ -192,7 +156,7 @@ markers_js += """
 mapa.get_root().html.add_child(folium.Element(markers_js))
 
 # ============================================================
-# 6. PANEL LATERAL – v7.3
+# 6. PANEL LATERAL (CON MODAL INTEGRADO)
 # ============================================================
 panel_html = Template("""
 {% macro html(this, kwargs) %}
@@ -200,8 +164,7 @@ panel_html = Template("""
 <style>
 #panelANS{
     position: fixed;
-    right:20px;
-    top:20px;
+    right:20px; top:20px;
     width:240px;
     background:white;
     padding:15px;
@@ -211,8 +174,7 @@ panel_html = Template("""
     font-family:Arial;
 }
 .filtroBtn{
-    width:100%;
-    padding:8px;
+    width:100%; padding:8px;
     border-radius:6px;
     margin-top:6px;
     cursor:pointer;
@@ -220,15 +182,24 @@ panel_html = Template("""
     text-align:center;
 }
 .subtitulo{
-    font-size:14px;
-    margin-top:12px;
+    font-size:14px; margin-top:12px;
     font-weight:bold;
 }
 </style>
 
 <div id="panelANS">
 
-<b style="font-size:18px;">📊 ANS Control</b><br><br>
+<!-- 🔔 MODAL ELEGANTE -->
+<div id="modalError"
+     style="display:none; position:fixed;
+     top:50%; left:50%; transform:translate(-50%, -50%);
+     background:white; padding:20px;
+     border-radius:10px; width:250px;
+     box-shadow:0 0 20px rgba(0,0,0,0.3);
+     z-index:9999999; text-align:center;">
+</div>
+
+<b style="font-size:18px;">📊 Control ANS</b><br><br>
 
 <b>Buscar pedido:</b><br>
 <input id="buscarPedido" style="width:100%;padding:6px;"><br>
@@ -249,97 +220,86 @@ panel_html = Template("""
 
 <b class="subtitulo">🗺️ Capas del Mapa</b>
 <div onclick="setCapa('sat')" class="filtroBtn" style="background:#c5e1a5;">Satélite</div>
-<div onclick="setCapa('calles')" class="filtroBtn" style="background:#aed581;">Calles</div>
+<div onclick="setCapa('calles')" class="filtroBtn" style="background:#aed581;">Vista Urbana</div>
 
 </div>
 
 <script>
-
-// ===============================
-// 🔰 SISTEMA DE CAPAS DE MAPA
-// ===============================
-
-// URLs de Google
+// ======== CAPAS GOOGLE ========
 const capas = {
     sat: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
-    calles: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
-    hibrido: "https://mt1.google.com/vt/lyrs=y,m&x={x}&y={y}&z={z}"
+    calles: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
 };
 
 window.currentLayer = null;
 
 window.setCapa = function(tipo){
-    if(window.currentLayer){
-        window.mapa.removeLayer(window.currentLayer);
-    }
-
-    window.currentLayer = L.tileLayer(capas[tipo], {
-        maxZoom: 20,
-        attribution: "Google"
-    }).addTo(window.mapa);
-
+    if(window.currentLayer){ window.mapa.removeLayer(window.currentLayer); }
+    window.currentLayer = L.tileLayer(capas[tipo], {maxZoom: 20}).addTo(window.mapa);
     window.mapa.invalidateSize(true);
 };
 
+// ======== MODAL ========
+function mostrarModal(msg){
+    let m = document.getElementById("modalError");
+    m.style.display = "block";
+    m.innerHTML = `
+        <b style="color:#b71c1c;">❗ ${msg}</b><br><br>
+        <button onclick="cerrarModal()" 
+                style="background:#b71c1c;color:white;padding:6px 12px;
+                       border:none;border-radius:6px;cursor:pointer;">
+            Cerrar
+        </button>
+    `;
+    setTimeout(()=>{ cerrarModal(); }, 2500);
+}
 
-// ===============================
-// 🔍 BÚSQUEDA Y FILTROS (SIN CAMBIOS)
-// ===============================
+function cerrarModal(){
+    document.getElementById("modalError").style.display = "none";
+}
 
+// ======== FILTROS Y BÚSQUEDA ========
 setTimeout(function(){
 
     function refrescar(){
-        setTimeout(function(){
-            window.mapa.invalidateSize(true);
-            window.mapa._onResize();
-            window.mapa.fire('moveend');
-        }, 30);
+        setTimeout(()=>{ window.mapa.invalidateSize(true); }, 30);
     }
 
-    window.ocultarTodos = function(){
-        Object.values(window.marcadores).forEach(m => m.setOpacity(0));
-        refrescar();
+    window.ocultarTodos = ()=>{ 
+        Object.values(window.marcadores).forEach(m=>m.setOpacity(0)); refrescar(); 
     };
 
-    window.mostrarTodos = function(){
-        Object.values(window.marcadores).forEach(m => m.setOpacity(1));
+    window.mostrarTodos = ()=>{
+        Object.values(window.marcadores).forEach(m=>m.setOpacity(1));
         window.mapa.setView([6.24, -75.57], 13);
         refrescar();
     };
 
-    window.filtrarEstado = function(estado){
+    window.filtrarEstado = (estado)=>{
         window.ocultarTodos();
-        window.estadoMarcadores[estado].forEach(p => {
-            window.marcadores[p].setOpacity(1);
-        });
+        window.estadoMarcadores[estado].forEach(p=> window.marcadores[p].setOpacity(1));
         refrescar();
     };
 
-    window.buscarPedido = function(){
+    window.buscarPedido = ()=>{
         let p = document.getElementById("buscarPedido").value.trim();
         if(!p) return;
 
         if(window.marcadores[p]){
-
             window.ocultarTodos();
-
             let mk = window.marcadores[p];
             mk.setOpacity(1);
             window.mapa.setView(mk.getLatLng(), 18);
             mk.openPopup();
             refrescar();
 
-            setTimeout(function(){
-                window.mapa.setZoom(13);
-                refrescar();
-            }, 600);
-
+            setTimeout(()=>{ window.mapa.setZoom(13); refrescar(); }, 600);
         } else {
-            alert("Pedido no encontrado");
+            mostrarModal("Pedido no encontrado");
         }
     };
 
-    window.limpiarBusqueda = function(){
+    window.limpiarBusqueda = ()=>{
         document.getElementById("buscarPedido").value = "";
         window.mostrarTodos();
     };
@@ -351,7 +311,6 @@ setTimeout(function(){
 {% endmacro %}
 """)
 
-
 panel = MacroElement()
 panel._template = panel_html
 mapa.get_root().add_child(panel)
@@ -362,5 +321,5 @@ mapa.get_root().add_child(panel)
 ruta_salida.parent.mkdir(exist_ok=True)
 mapa.save(ruta_salida)
 
-print("🟢 Mapa ANS v7.3 generado correctamente.")
+print("🟢 Mapa ANS v7.4 generado correctamente.")
 webbrowser.open(str(ruta_salida))
