@@ -27,7 +27,10 @@ if sys.stderr.encoding is None or sys.stderr.encoding.lower() != "utf-8":
 # ------------------------------------------------------------
 # RUTA DE ARCHIVOS
 # ------------------------------------------------------------
-RUTA_LOGO = r"data_raw/elite.png"
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+RUTA_LOGO = BASE_DIR / "assets" / "logo.png"
 RUTA_SCRIPT_ANS = r"calculos_ans.py"
 RUTA_SCRIPT_LIMPIEZA = r"limpieza_fenix.py"
 RUTA_SCRIPT_MERGE = r"merge_fenix_actas.py"
@@ -298,29 +301,67 @@ ventana.geometry(f"{ancho}x{alto}+{x}+{y}")
 ventana.resizable(False, False)
 
 # ------------------------------------------------------------
-# ENCABEZADO
+# # ENCABEZADO
+# # ------------------------------------------------------------
+# frame_banner = tk.Frame(ventana, bg="#EAEDED", height=120)
+# frame_banner.pack(fill="x")
+
+# frame_superior = tk.Frame(frame_banner, bg="#EAEDED")
+# frame_superior.pack(pady=(10, 0))
+
+# try:
+#     logo_img = Image.open(RUTA_LOGO)
+#     logo_img = logo_img.resize((70, 70), Image.Resampling.LANCZOS)
+#     logo = ImageTk.PhotoImage(logo_img)
+#     tk.Label(frame_superior, image=logo, bg="#EAEDED").pack(side="left", padx=15)
+# except:
+#     tk.Label(frame_superior, text="[Logo no encontrado]", bg="#EAEDED").pack(side="left", padx=15)
+
+# tk.Label(frame_superior, text="ELITE ", font=("Segoe UI", 18, "bold"),
+#          fg="black", bg="#EAEDED").pack(side="left")
+# tk.Label(frame_superior, text="Ingenieros S.A.S.", font=("Segoe UI", 18, "bold"),
+#          fg="#1E8449", bg="#EAEDED").pack(side="left")
+
+# tk.Label(frame_banner, text="Control ANS", font=("Segoe UI", 14, "bold"),
+#          fg="#1B263B", bg="#EAEDED").pack(pady=(0, 10))
 # ------------------------------------------------------------
-frame_banner = tk.Frame(ventana, bg="#EAEDED", height=120)
+# ENCABEZADO (Versión elegante v4 mejorada)
+# ------------------------------------------------------------
+frame_banner = tk.Frame(ventana, bg="#EAEDED", height=110)
 frame_banner.pack(fill="x")
 
 frame_superior = tk.Frame(frame_banner, bg="#EAEDED")
-frame_superior.pack(pady=(10, 0))
+frame_superior.pack(pady=(5, 0))
 
 try:
+    # Logo más pequeño y centrado
     logo_img = Image.open(RUTA_LOGO)
-    logo_img = logo_img.resize((70, 70), Image.Resampling.LANCZOS)
+    logo_img = logo_img.resize((70, 70), Image.Resampling.LANCZOS)  # 👈 tamaño ajustado
     logo = ImageTk.PhotoImage(logo_img)
+
     tk.Label(frame_superior, image=logo, bg="#EAEDED").pack(side="left", padx=15)
 except:
-    tk.Label(frame_superior, text="[Logo no encontrado]", bg="#EAEDED").pack(side="left", padx=15)
+    tk.Label(frame_superior, text="[Logo no encontrado]", bg="#EAEDED").pack(side="left", padx=10)
 
-tk.Label(frame_superior, text="ELITE ", font=("Segoe UI", 18, "bold"),
-         fg="black", bg="#EAEDED").pack(side="left")
-tk.Label(frame_superior, text="Ingenieros S.A.S.", font=("Segoe UI", 18, "bold"),
-         fg="#1E8449", bg="#EAEDED").pack(side="left")
+# Nombre de la empresa más alineado
+tk.Label(frame_superior,
+         text="ELITE ",
+         font=("Segoe UI", 20, "bold"),
+         fg="black",
+         bg="#EAEDED").pack(side="left")
 
-tk.Label(frame_banner, text="Control ANS", font=("Segoe UI", 14, "bold"),
-         fg="#1B263B", bg="#EAEDED").pack(pady=(0, 10))
+tk.Label(frame_superior,
+         text="Ingenieros S.A.S.",
+         font=("Segoe UI", 20, "bold"),
+         fg="#1E8449",
+         bg="#EAEDED").pack(side="left")
+
+# Subtítulo centrado
+tk.Label(frame_banner,
+         text="Control ANS",
+         font=("Segoe UI", 14, "bold"),
+         fg="#1B263B",
+         bg="#EAEDED").pack(pady=(0, 5))
 
 # ------------------------------------------------------------
 # BOTONES PRINCIPALES
@@ -380,22 +421,25 @@ btn_papelera_drive.grid(row=0, column=3, padx=10, pady=5, sticky="ew")
 aplicar_hover(btn_papelera_drive, "#E74C3C")
 
 # ------------------------------------------------------------
-# BOTÓN VISOR GEOGRÁFICO
+# BOTÓN VISOR GEOGRÁFICO (ahora igual a los demás)
 # ------------------------------------------------------------
 frame_visor = tk.Frame(ventana, bg="#EAEDED")
 frame_visor.pack(pady=(5, 10))
 
-btn_visor = tk.Button(frame_visor,
-                      text="VISOR GEOGRÁFICO ANS",
-                      width=30, height=2,
-                      bg="#154360", fg="white",
-                      font=("Segoe UI", 11, "bold"),
-                      relief="ridge", borderwidth=3,
-                      cursor="hand2",
-                      command=abrir_mapa)
+btn_visor = tk.Button(
+    frame_visor,
+    text="VISOR GEOGRÁFICO ANS",
+    width=20, height=2,                # 👈 MISMO TAMAÑO QUE LOS OTROS
+    bg="#1E8449", fg="white",          # 👈 Color azul elegante
+    font=("Segoe UI", 10, "bold"),     # 👈 MISMA FUENTE
+    relief="ridge", borderwidth=3,
+    cursor="hand2",
+    command=abrir_mapa
+)
 
 btn_visor.pack()
-aplicar_hover(btn_visor, "#1F618D")
+aplicar_hover(btn_visor, "#1F618D")     # 👈 Hover azul claro
+
 
 # ------------------------------------------------------------
 # BARRA PROGRESO

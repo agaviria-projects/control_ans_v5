@@ -27,23 +27,45 @@ df = pd.read_excel(ruta_fenix, sheet_name="FENIX_ANS", dtype=str)
 df.columns = df.columns.str.upper().str.strip()
 
 # ============================================================
-# 2.1 NORMALIZAR ESTADOS
+# 2.1 NORMALIZAR ESTADOS (VERSIÓN ULTRA-ROBUSTA)
 # ============================================================
 def normalizar_estado(e):
     if not isinstance(e, str):
         return "SIN FECHA"
 
+    # Eliminar caracteres invisibles
     e = re.sub(r"[\u200B-\u200D\uFEFF\u00A0]", "", e)
+
+    # Normalizar tildes y espacios
     e = (
-        e.upper().strip()
+        e.upper()
         .replace("Í", "I")
-        .replace(" 0 DIAS", "_0 DIAS")
-        .replace("0 DIAS", "_0 DIAS")
+        .replace("Á", "A")
+        .replace("É", "E")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
         .replace("SIN DATO", "SIN FECHA")
+        .strip()
     )
 
-    ESTADOS_VALIDOS = {"A TIEMPO", "ALERTA", "ALERTA_0 DIAS", "VENCIDO", "SIN FECHA"}
-    return e if e in ESTADOS_VALIDOS else "SIN FECHA"
+    # Unificar variantes de ALERTA 0 DIAS
+    if "ALERTA" in e and ("0" in e or " 0 " in e):
+        return "ALERTA_0 DIAS"
+
+    # ALERTA normal
+    if "ALERTA" in e:
+        return "ALERTA"
+
+    # A TIEMPO
+    if "TIEMPO" in e:
+        return "A TIEMPO"
+
+    # VENCIDO
+    if "VENCID" in e:
+        return "VENCIDO"
+
+    # SIN FECHA final
+    return "SIN FECHA"
 
 df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
 
