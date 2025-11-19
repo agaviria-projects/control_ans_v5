@@ -98,6 +98,7 @@ def business_days_between(start_dt, end_dt):
 # CARGA DE DATOS
 # ------------------------------------------------------------
 df = pd.read_excel(ruta_input)
+print(df[df["PEDIDO"].astype(str).str.contains("2275", na=False)])
 print(f"📂 Archivo cargado: {ruta_input.name} ({len(df)} registros)")
 
 # ------------------------------------------------------------
@@ -263,82 +264,103 @@ def verificar_archivo_abierto(ruta):
             print("⛔ Proceso detenido: el archivo está abierto.")
             exit()
 # ------------------------------------------------------------
-# 🔗 CRUCE CON GOOGLE SHEETS – FORMULARIO CONTROL ANS (versión protegida)
+# 🔗 CRUCE CON GOOGLE SHEETS – FORMULARIO CONTROL ANS (v8.1 blindado)
 # ------------------------------------------------------------
 import gspread
 from google.oauth2.service_account import Credentials
+import re
+
+def limpiar_pedido(x):
+    """
+    Limpia cualquier valor de PEDIDO:
+    - Convierte a texto
+    - Elimina espacios invisibles
+    - Quita ceros adelante
+    - Elimina .0 si viene como número flotante
+    """
+    if pd.isna(x):
+        return ""
+    x = str(x).strip()
+
+    # Quitar caracteres invisibles
+    x = re.sub(r"[\u200B-\u200D\uFEFF\u00A0]", "", x)
+
+    # Quitar .0 de Excel
+    if x.endswith(".0"):
+        x = x.replace(".0", "")
+
+    # Quitar ceros a la izquierda
+    x = x.lstrip("0")
+
+    return x
+
 
 try:
-    # Ruta al archivo de credenciales del proyecto (Service Account)
-    cred_path = base_path / "Control_ANS" / "control-ans-elite-f4ea102db569.json"
-
-    # Definir los permisos de acceso solo lectura
+    cred_path = base_path / "control-ans-elite-f4ea102db569.json"  # <--- CORRECTO
     scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     creds = Credentials.from_service_account_file(cred_path, scopes=scopes)
-
-    # Conexión con Google Sheets
     client = gspread.authorize(creds)
 
-    # ✅ ID real de tu hoja "Formulario Control ANS"
-    SHEET_ID = "1bPLGVVz50k6PlNp382isJrqtW_3IsrrhGW0UUlMf-bM"
 
-    # Abrir la hoja
+    SHEET_ID = "1bPLGVVz50k6PlNp382isJrqtW_3IsrrhGW0UUlMf-bM"
     sheet = client.open_by_key(SHEET_ID)
-    # Buscar automáticamente la hoja que contiene "Form" o "Respuesta"
-    sheet_names = [ws.title for ws in sheet.worksheets()]
-    target_name = None
-    for name in sheet_names:
-        if "FORM" in name.upper() or "RESPUESTA" in name.upper():
-            target_name = name
+
+    hoja = None
+    for ws in sheet.worksheets():
+        if "RESP" in ws.title.upper() or "FORM" in ws.title.upper():
+            hoja = ws
             break
 
-    if not target_name:
-        raise Exception(f"No se encontró ninguna pestaña válida. Hojas disponibles: {sheet_names}")
+    if hoja is None:
+        raise Exception("No se detectó pestaña válida del formulario.")
 
-    worksheet = sheet.worksheet(target_name)
-    print(f"📄 Hoja detectada automáticamente: {target_name}")
+    data = hoja.get_all_records()
 
-    # Leer todos los registros de la hoja activa
-    data = worksheet.get_all_records()
-
-    # ✅ Protección: si el formulario está vacío, no hacer merge
     if not data:
-        print("⚠️ Formulario vacío: no hay datos para cruzar. Se omite el merge con Google Sheets.")
+        print("⚠️ Formulario vacío — se dejan columnas en SIN DATO.")
         df["REPORTE_TECNICO"] = "SIN DATO"
         df["TECNICO_EJECUTA"] = "SIN DATO"
     else:
-        # Crear DataFrame con los datos del formulario
         df_form = pd.DataFrame(data)
-        df_form.rename(columns=lambda x: str(x).strip().upper(), inplace=True)
+        df_form.rename(columns=lambda c: c.strip().upper(), inplace=True)
 
-        # Normalizar nombres de columnas
-        if "NÚMERO DEL PEDIDO" in df_form.columns:
-            df_form.rename(columns={"NÚMERO DEL PEDIDO": "PEDIDO"}, inplace=True)
-        if "ESTADO DEL PEDIDO" in df_form.columns:
-            df_form.rename(columns={"ESTADO DEL PEDIDO": "REPORTE_TECNICO"}, inplace=True)
-        if "NOMBRE DEL TÉCNICO" in df_form.columns:
-            df_form.rename(columns={"NOMBRE DEL TÉCNICO": "TECNICO_EJECUTA"}, inplace=True)
+        # Renombrar columnas
+        renames = {
+            "NÚMERO DEL PEDIDO": "PEDIDO",
+            "ESTADO DEL PEDIDO": "REPORTE_TECNICO",
+            "NOMBRE DEL TÉCNICO": "TECNICO_EJECUTA",
+        }
+        df_form.rename(columns=renames, inplace=True)
 
-        # Convertir PEDIDO a texto para evitar errores de cruce
-        df["PEDIDO"] = df["PEDIDO"].astype(str)
-        df_form["PEDIDO"] = df_form["PEDIDO"].astype(str)
+        # Normalizar pedidos
+        df["PEDIDO"] = df["PEDIDO"].apply(limpiar_pedido)
+        df_form["PEDIDO"] = df_form["PEDIDO"].apply(limpiar_pedido)
 
-        # Definir columnas disponibles para el merge
-        columnas_form = [c for c in ["PEDIDO", "REPORTE_TECNICO", "TECNICO_EJECUTA"] if c in df_form.columns]
+        # Limpiar textos del formulario
+        if "REPORTE_TECNICO" in df_form.columns:
+            df_form["REPORTE_TECNICO"] = df_form["REPORTE_TECNICO"].astype(str).str.upper().str.strip()
 
-        # Merge principal (LEFT JOIN)
-        df = df.merge(df_form[columnas_form], on="PEDIDO", how="left")
+        if "TECNICO_EJECUTA" in df_form.columns:
+            df_form["TECNICO_EJECUTA"] = df_form["TECNICO_EJECUTA"].astype(str).str.upper().str.strip()
+
+        # MERGE SEGURO
+        columnas = ["PEDIDO", "REPORTE_TECNICO", "TECNICO_EJECUTA"]
+        columnas = [c for c in columnas if c in df_form.columns]
+
+        df = df.merge(df_form[columnas], on="PEDIDO", how="left")
 
         # Rellenar vacíos
         df["REPORTE_TECNICO"] = df["REPORTE_TECNICO"].fillna("SIN DATO")
-        if "TECNICO_EJECUTA" in df.columns:
-            df["TECNICO_EJECUTA"] = df["TECNICO_EJECUTA"].fillna("SIN DATO")
+        df["TECNICO_EJECUTA"] = df["TECNICO_EJECUTA"].fillna("SIN DATO")
 
-        print("🔗 Cruce con formulario en Google Sheets completado correctamente.")
-        print(f"📊 Registros leídos desde formulario: {len(df_form)}")
+        print("🔗 Cruce con Google Sheets finalizado correctamente ✔")
 
 except Exception as e:
-    print(f"⚠️ Error durante la conexión o cruce con Google Sheets: {e}")
+    print(f"⚠️ Error en cruce con formulario Google Sheets: {e}")
+    df["REPORTE_TECNICO"] = df.get("REPORTE_TECNICO", "SIN DATO")
+    df["TECNICO_EJECUTA"] = df.get("TECNICO_EJECUTA", "SIN DATO")
+
+
 # ============================================================
 # 🩹 CREAR COLUMNAS SI NO EXISTEN (solución definitiva)
 # ============================================================
