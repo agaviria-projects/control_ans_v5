@@ -1,6 +1,6 @@
 """
-MAPA ANS PROFESIONAL – v7.4 (ULTRA-ESTABLE)
-Google Maps + Panel ANS + Modal Elegante
+MAPA ANS PROFESIONAL – v7.7
+Google Maps + Panel ANS + Modal + Filtro Actividad + Limpiar + Contador
 Héctor + IA – 2025
 """
 
@@ -27,47 +27,57 @@ df = pd.read_excel(ruta_fenix, sheet_name="FENIX_ANS", dtype=str)
 df.columns = df.columns.str.upper().str.strip()
 
 # ============================================================
-# 2.1 NORMALIZAR ESTADOS (VERSIÓN ULTRA-ROBUSTA)
+# 2.1 NORMALIZAR ESTADOS (ULTRA-BLINDADO)
 # ============================================================
 def normalizar_estado(e):
-    if not isinstance(e, str):
+    if not isinstance(e, str) or e.strip() == "":
         return "SIN FECHA"
 
-    # Eliminar caracteres invisibles
+    # Quitar caracteres invisibles y normalizar
     e = re.sub(r"[\u200B-\u200D\uFEFF\u00A0]", "", e)
+    e = e.upper().strip()
 
-    # Normalizar tildes y espacios
-    e = (
-        e.upper()
-        .replace("Í", "I")
-        .replace("Á", "A")
-        .replace("É", "E")
-        .replace("Ó", "O")
-        .replace("Ú", "U")
-        .replace("SIN DATO", "SIN FECHA")
-        .strip()
-    )
+    # Normalizar tildes: DÍAS → DIAS
+    e = e.replace("Í", "I")
 
-    # Unificar variantes de ALERTA 0 DIAS
-    if "ALERTA" in e and ("0" in e or " 0 " in e):
+    # Normalizar dobles espacios
+    e = " ".join(e.split())
+
+    # Convertir todas las variaciones de ALERTA 0 DIAS
+    variantes_alerta0 = [
+        "ALERTA 0 DIAS", "ALERTA_0 DIAS", "ALERTA0 DIAS",
+        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA_ 0 DIAS",
+        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA 0 DIAS",
+        "ALERTA 0 DIAS", "ALERTA_0 DIAS", "ALERTA 0 DIAS",
+        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA 0 DIAS",
+        "ALERTA 0 DIAS", "ALERTA_0 DIAS", "ALERTA 0 DIAS",
+        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA 0 DIAS",
+        "ALERTA0 DIAS", "ALERTA 0 DIAS", "ALERTA0 DIAS",
+        "ALERTA 0 DIAS", "ALERTA0 DIAS", "ALERTA 0 DIAS"
+    ]
+
+    # También cubre "DÍAS" (con tilde → ya normalizado)
+    if any(v in e for v in variantes_alerta0):
         return "ALERTA_0 DIAS"
 
-    # ALERTA normal
-    if "ALERTA" in e:
-        return "ALERTA"
+    # Convertir SIN DATO → SIN FECHA
+    if "SIN DATO" in e:
+        return "SIN FECHA"
 
-    # A TIEMPO
-    if "TIEMPO" in e:
-        return "A TIEMPO"
+    # Lista final válida
+    ESTADOS_VALIDOS = {
+        "A TIEMPO",
+        "ALERTA",
+        "ALERTA_0 DIAS",
+        "VENCIDO",
+        "SIN FECHA"
+    }
 
-    # VENCIDO
-    if "VENCID" in e:
-        return "VENCIDO"
+    return e if e in ESTADOS_VALIDOS else "SIN FECHA"
 
-    # SIN FECHA final
-    return "SIN FECHA"
 
 df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
+
 
 # ============================================================
 # 2.2 LIMPIAR COORDENADAS
@@ -96,9 +106,13 @@ df_mapa = df.drop_duplicates(
 
 print(f"[INFO] Total pedidos visibles en el mapa: {len(df_mapa)}")
 
+# ============================================================
+# 2.4 LISTA DE ACTIVIDADES
+# ============================================================
+actividades_unicas = sorted(df_mapa["ACTIVIDAD"].dropna().unique().tolist())
 
 # ============================================================
-# 3. MAPA BASE (SATÉLITE)
+# 3. MAPA BASE
 # ============================================================
 mapa = folium.Map(
     location=[6.24, -75.57],
@@ -110,13 +124,15 @@ mapa = folium.Map(
 mapa_id = mapa.get_name()
 
 # ============================================================
-# 3.1 Variables JS Globales
+# 3.1 VARIABLES JS
 # ============================================================
 mapa.get_root().html.add_child(folium.Element(f"""
 <script>
 document.addEventListener("DOMContentLoaded", function() {{
+
     window.mapa = {mapa_id};
     window.marcadores = {{}};
+
     window.estadoMarcadores = {{
         "A TIEMPO": [],
         "ALERTA": [],
@@ -124,6 +140,11 @@ document.addEventListener("DOMContentLoaded", function() {{
         "VENCIDO": [],
         "SIN FECHA": []
     }};
+
+    window.actividadMarcadores = {{}};
+
+    window.listaActividades = {actividades_unicas};
+
 }});
 </script>
 """))
@@ -151,6 +172,7 @@ document.addEventListener("DOMContentLoaded", function() {
 for _, row in df_mapa.iterrows():
     pedido = row["PEDIDO"]
     estado = row["ESTADO"]
+    actividad = row["ACTIVIDAD"]
     lat = row["COORDENADAY"]
     lon = row["COORDENADAX"]
 
@@ -169,6 +191,11 @@ var mk_{pedido} = L.marker([{lat}, {lon}], {{
 
 window.marcadores["{pedido}"] = mk_{pedido};
 window.estadoMarcadores["{estado}"].push("{pedido}");
+
+if (!window.actividadMarcadores["{actividad}"]) {{
+    window.actividadMarcadores["{actividad}"] = [];
+}}
+window.actividadMarcadores["{actividad}"].push("{pedido}");
 """
 
 markers_js += """
@@ -179,7 +206,7 @@ markers_js += """
 mapa.get_root().html.add_child(folium.Element(markers_js))
 
 # ============================================================
-# 6. PANEL LATERAL + MODAL
+# 6. PANEL
 # ============================================================
 panel_html = Template("""
 {% macro html(this, kwargs) %}
@@ -230,13 +257,29 @@ panel_html = Template("""
 
 <hr>
 
-<b class="subtitulo">Filtros:</b>
+<b class="subtitulo">Filtros por Estado:</b>
 <div onclick="filtrarEstado('A TIEMPO')" class="filtroBtn" style="background:#00C853;color:white;">A TIEMPO</div>
 <div onclick="filtrarEstado('ALERTA')" class="filtroBtn" style="background:#FFD600;">ALERTA</div>
 <div onclick="filtrarEstado('ALERTA_0 DIAS')" class="filtroBtn" style="background:#FF8F00;">ALERTA 0 DÍAS</div>
 <div onclick="filtrarEstado('VENCIDO')" class="filtroBtn" style="background:#D50000;color:white;">VENCIDO</div>
 <div onclick="filtrarEstado('SIN FECHA')" class="filtroBtn" style="background:#6a1b9a;color:white;">SIN FECHA</div>
 <div onclick="mostrarTodos()" class="filtroBtn" style="background:#bbdefb;">MOSTRAR TODOS</div>
+
+<hr>
+
+<b class="subtitulo">Filtro por Actividad:</b>
+<select id="selectActividad" class="filtroBtn" style="padding:6px;width:100%;">
+    <option value="">-- Seleccione actividad --</option>
+</select>
+
+<div onclick="filtrarActividad()" class="filtroBtn" style="background:#90caf9;">FILTRAR ACTIVIDAD</div>
+<div onclick="limpiarActividad()" class="filtroBtn" style="background:#bdbdbd;">LIMPIAR ACTIVIDAD</div>
+
+<div id="resultadoActividad" 
+     style="margin-top:6px;padding:8px;background:#eeeeee;
+            border-radius:6px;text-align:center;font-weight:bold;">
+    Resultados: 0 pedidos
+</div>
 
 <hr>
 
@@ -247,7 +290,22 @@ panel_html = Template("""
 </div>
 
 <script>
-// ======= CAPAS GOOGLE =======
+
+// ======= LLENAR ACTIVIDADES =======
+document.addEventListener("DOMContentLoaded", function() {
+    let sel = document.getElementById("selectActividad");
+    if (window.listaActividades) {
+        window.listaActividades.forEach(act => {
+            let opt = document.createElement("option");
+            opt.value = act;
+            opt.textContent = act;
+            sel.appendChild(opt);
+        });
+    }
+});
+
+
+// ======= CAPAS =======
 const capas = {
     sat: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
     calles: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
@@ -260,6 +318,7 @@ window.setCapa = function(tipo){
     window.currentLayer = L.tileLayer(capas[tipo], {maxZoom: 20}).addTo(window.mapa);
     window.mapa.invalidateSize(true);
 };
+
 
 // ======= MODAL =======
 function mostrarModal(msg){
@@ -280,7 +339,8 @@ function cerrarModal(){
     document.getElementById("modalError").style.display = "none";
 }
 
-// ======= FILTROS Y BÚSQUEDA =======
+
+// ======= FILTROS =======
 setTimeout(function(){
 
     function refrescar(){ setTimeout(()=> window.mapa.invalidateSize(true), 30); }
@@ -296,12 +356,53 @@ setTimeout(function(){
         refrescar();
     };
 
+    // FILTRAR ESTADO
     window.filtrarEstado = (estado)=>{
         window.ocultarTodos();
         window.estadoMarcadores[estado].forEach(p=> window.marcadores[p].setOpacity(1));
         refrescar();
     };
 
+    // FILTRAR ACTIVIDAD
+    window.filtrarActividad = ()=>{
+        let act = document.getElementById("selectActividad").value;
+
+        if(!act){
+            mostrarModal("Seleccione una actividad");
+            return;
+        }
+
+        if(!window.actividadMarcadores[act]){
+            mostrarModal("No hay pedidos con esta actividad");
+            document.getElementById("resultadoActividad").innerHTML = "Resultados: 0 pedidos";
+            return;
+        }
+
+        let lista = window.actividadMarcadores[act];
+
+        window.ocultarTodos();
+
+        lista.forEach(p=>{
+            if(window.marcadores[p]){
+                window.marcadores[p].setOpacity(1);
+            }
+        });
+
+        document.getElementById("resultadoActividad").innerHTML = 
+            "Resultados: " + lista.length + " pedidos";
+
+        window.mapa.setView([6.24, -75.57], 13);
+    };
+
+    // LIMPIAR ACTIVIDAD
+    window.limpiarActividad = ()=>{
+        let sel = document.getElementById("selectActividad");
+        sel.value = "";
+        window.mostrarTodos();
+        document.getElementById("resultadoActividad").innerHTML = "Resultados: 0 pedidos";
+    };
+
+    // BUSCAR PEDIDO
     window.buscarPedido = ()=>{
         let p = document.getElementById("buscarPedido").value.trim();
         if(!p) return;
@@ -314,7 +415,10 @@ setTimeout(function(){
             mk.openPopup();
             refrescar();
 
-            setTimeout(()=>{ window.mapa.setZoom(13); refrescar(); }, 600);
+            setTimeout(()=>{ 
+                window.mapa.setZoom(13); 
+                refrescar(); 
+            }, 600);
         } else {
             mostrarModal("Pedido no encontrado");
         }
@@ -342,5 +446,8 @@ mapa.get_root().add_child(panel)
 ruta_salida.parent.mkdir(exist_ok=True)
 mapa.save(ruta_salida)
 
-print("Mapa ANS generado correctamente.")
-webbrowser.open(str(ruta_salida))
+print("Mapa actualizado y abierto correctamente.")
+# import os
+# os.startfile(r"C:\Users\Acer\Desktop\Control_ANS_v5\data_output\mapa_ans.html")
+
+# #webbrowser.open(str(ruta_salida))
