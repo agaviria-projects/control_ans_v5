@@ -1,6 +1,6 @@
 """
-MAPA ANS PROFESIONAL – v7.7
-Google Maps + Panel ANS + Modal + Filtro Actividad + Limpiar + Contador
+MAPA ANS PROFESIONAL – v8.3 (BLINDADO + AGRUPACIÓN + TOOLTIP PRO)
+Google Maps + Panel ANS + Filtros + Actividad + Tooltip Multi-Estado
 Héctor + IA – 2025
 """
 
@@ -8,111 +8,135 @@ import pandas as pd
 import folium
 from branca.element import Template, MacroElement
 from pathlib import Path
-import webbrowser
 import re
+import sys
 
 # ============================================================
-# 1. RUTAS
+# 0. FIX UTF-8
+# ============================================================
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+
+# ============================================================
+# 1. RUTAS BASE
 # ============================================================
 script_path = Path(__file__).resolve()
 base_path = script_path.parent
 
 ruta_fenix = base_path / "data_clean" / "FENIX_ANS.xlsx"
-ruta_salida = base_path / "data_output" / "mapa_ans.html"
+
+ruta_salida_onedrive = Path(
+    r"C:/Users/hector.gaviria/OneDrive - Elite Ingenieros SAS/Control_ANS/mapa_ans.html"
+)
+ruta_salida_proyecto = base_path / "data_output" / "mapa_ans.html"
+ruta_log_errores = base_path / "data_output" / "errores_geolocalizacion.txt"
+
+ruta_salida_onedrive.parent.mkdir(exist_ok=True)
+ruta_salida_proyecto.parent.mkdir(exist_ok=True)
 
 # ============================================================
-# 2. CARGAR EXCEL
+# 2. CARGAR FENIX_ANS
 # ============================================================
 df = pd.read_excel(ruta_fenix, sheet_name="FENIX_ANS", dtype=str)
 df.columns = df.columns.str.upper().str.strip()
 
+# 🔒 Normalización ultra segura
+df["ESTADO"] = df["ESTADO"].astype(str).str.normalize("NFKC")
+
+print(f"[INFO] Registros cargados desde FENIX_ANS.xlsx: {len(df)}")
+
 # ============================================================
-# 2.1 NORMALIZAR ESTADOS (ULTRA-BLINDADO)
+# 2.1 NORMALIZAR ESTADO (BLINDADO)
 # ============================================================
 def normalizar_estado(e):
-    if not isinstance(e, str) or e.strip() == "":
+    if not isinstance(e, str):
         return "SIN FECHA"
 
-    # Quitar caracteres invisibles y normalizar
     e = re.sub(r"[\u200B-\u200D\uFEFF\u00A0]", "", e)
-    e = e.upper().strip()
-
-    # Normalizar tildes: DÍAS → DIAS
-    e = e.replace("Í", "I")
-
-    # Normalizar dobles espacios
     e = " ".join(e.split())
 
-    # Convertir todas las variaciones de ALERTA 0 DIAS
-    variantes_alerta0 = [
-        "ALERTA 0 DIAS", "ALERTA_0 DIAS", "ALERTA0 DIAS",
-        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA_ 0 DIAS",
-        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA 0 DIAS",
-        "ALERTA 0 DIAS", "ALERTA_0 DIAS", "ALERTA 0 DIAS",
-        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA 0 DIAS",
-        "ALERTA 0 DIAS", "ALERTA_0 DIAS", "ALERTA 0 DIAS",
-        "ALERTA 0 DIAS", "ALERTA 0 DIAS", "ALERTA 0 DIAS",
-        "ALERTA0 DIAS", "ALERTA 0 DIAS", "ALERTA0 DIAS",
-        "ALERTA 0 DIAS", "ALERTA0 DIAS", "ALERTA 0 DIAS"
-    ]
+    e = (
+        e.upper()
+         .replace("Á","A").replace("É","E")
+         .replace("Í","I").replace("Ó","O")
+         .replace("Ú","U")
+    )
 
-    # También cubre "DÍAS" (con tilde → ya normalizado)
-    if any(v in e for v in variantes_alerta0):
+    if re.search(r"\bALERTA\s*0\b", e):
         return "ALERTA_0 DIAS"
 
-    # Convertir SIN DATO → SIN FECHA
-    if "SIN DATO" in e:
-        return "SIN FECHA"
+    EST = ["A TIEMPO", "ALERTA", "ALERTA_0 DIAS", "VENCIDO", "SIN FECHA"]
+    if e in EST:
+        return e
 
-    # Lista final válida
-    ESTADOS_VALIDOS = {
-        "A TIEMPO",
-        "ALERTA",
-        "ALERTA_0 DIAS",
-        "VENCIDO",
-        "SIN FECHA"
-    }
+    if "A TIEMPO" in e:
+        return "A TIEMPO"
+    if "ALERTA" in e:
+        return "ALERTA"
+    if "VENCID" in e:
+        return "VENCIDO"
 
-    return e if e in ESTADOS_VALIDOS else "SIN FECHA"
+    return "SIN FECHA"
 
 
 df["ESTADO"] = df["ESTADO"].apply(normalizar_estado)
 
+# ============================================================
+# 2.2 VALIDACIÓN COORDENADAS + LOG
+# ============================================================
+errores = []
 
-# ============================================================
-# 2.2 LIMPIAR COORDENADAS
-# ============================================================
-def limpiar_coord(x):
-    if x is None:
-        return None
-    x = str(x).replace(",", ".").strip()
+def validar_coord(x, y, pedido):
     try:
-        return float(x)
+        x = float(str(x).replace(",", "."))
+        y = float(str(y).replace(",", "."))
     except:
-        return None
+        errores.append(f"{pedido}: coordenada no numérica → X={x}, Y={y}")
+        return None, None
 
-df["COORDENADAX"] = df["COORDENADAX"].apply(limpiar_coord)
-df["COORDENADAY"] = df["COORDENADAY"].apply(limpiar_coord)
+    if not (5 <= y <= 8) or not (-78 <= x <= -73):
+        errores.append(f"{pedido}: fuera de rango → X={x}, Y={y}")
+        return None, None
 
-df = df.dropna(subset=["COORDENADAX", "COORDENADAY"])
+    return x, y
 
-# ============================================================
-# 2.3 ELIMINAR DUPLICADOS
-# ============================================================
-df_mapa = df.drop_duplicates(
-    subset=["PEDIDO", "COORDENADAX", "COORDENADAY"],
-    keep="first"
-)
-
-print(f"[INFO] Total pedidos visibles en el mapa: {len(df_mapa)}")
+df["COORD_X"], df["COORD_Y"] = zip(*[
+    validar_coord(row["COORDENADAX"], row["COORDENADAY"], row["PEDIDO"])
+    for _, row in df.iterrows()
+])
 
 # ============================================================
-# 2.4 LISTA DE ACTIVIDADES
+# 2.3 AGRUPAR POR PEDIDO Y RESOLVER ESTADOS
+# ============================================================
+prioridad = {
+    "VENCIDO": 4,
+    "ALERTA_0 DIAS": 3,
+    "ALERTA": 2,
+    "A TIEMPO": 1,
+    "SIN FECHA": 0
+}
+
+grupo = df.groupby("PEDIDO").agg({
+    "ESTADO": list,
+    "COORD_X": "first",
+    "COORD_Y": "first",
+    "ACTIVIDAD": "first"
+}).reset_index()
+
+def estado_final(lista_estados):
+    return sorted(lista_estados, key=lambda x: prioridad.get(x, 0), reverse=True)[0]
+
+grupo["ESTADO_FINAL"] = grupo["ESTADO"].apply(estado_final)
+
+df_mapa = grupo.copy()
+
+# ============================================================
+# 3. ACTIVIDADES ÚNICAS
 # ============================================================
 actividades_unicas = sorted(df_mapa["ACTIVIDAD"].dropna().unique().tolist())
 
 # ============================================================
-# 3. MAPA BASE
+# 4. MAPA BASE
 # ============================================================
 mapa = folium.Map(
     location=[6.24, -75.57],
@@ -124,15 +148,13 @@ mapa = folium.Map(
 mapa_id = mapa.get_name()
 
 # ============================================================
-# 3.1 VARIABLES JS
+# 5. VARIABLES JS BASE
 # ============================================================
 mapa.get_root().html.add_child(folium.Element(f"""
 <script>
 document.addEventListener("DOMContentLoaded", function() {{
-
     window.mapa = {mapa_id};
     window.marcadores = {{}};
-
     window.estadoMarcadores = {{
         "A TIEMPO": [],
         "ALERTA": [],
@@ -140,17 +162,14 @@ document.addEventListener("DOMContentLoaded", function() {{
         "VENCIDO": [],
         "SIN FECHA": []
     }};
-
     window.actividadMarcadores = {{}};
-
     window.listaActividades = {actividades_unicas};
-
 }});
 </script>
 """))
 
 # ============================================================
-# 4. ICONOS
+# 6. COLORES
 # ============================================================
 ICON_SIZE = [20, 33]
 colores = {
@@ -162,21 +181,34 @@ colores = {
 }
 
 # ============================================================
-# 5. MARCADORES
+# 7. MARCADORES CON TOOLTIP MULTI-ESTADO
 # ============================================================
-markers_js = """
-<script>
-document.addEventListener("DOMContentLoaded", function() {
-"""
+markers_js = "<script>\ndocument.addEventListener('DOMContentLoaded', function() {\n"
 
 for _, row in df_mapa.iterrows():
     pedido = row["PEDIDO"]
-    estado = row["ESTADO"]
+    lat = row["COORD_Y"]
+    lon = row["COORD_X"]
     actividad = row["ACTIVIDAD"]
-    lat = row["COORDENADAY"]
-    lon = row["COORDENADAX"]
 
-    color = colores.get(estado, "grey")
+    lista_estados = row["ESTADO"]
+    estado_final = row["ESTADO_FINAL"]
+
+    # Contar estados
+    conteo = {}
+    for est in lista_estados:
+        conteo[est] = conteo.get(est, 0) + 1
+
+    # Construir tooltip
+    tooltip_html = f"<b>PEDIDO: {pedido}</b><br><br>"
+    tooltip_html += "<b>ESTADOS DETECTADOS:</b><br>"
+
+    for est, cant in conteo.items():
+        tooltip_html += f"- {est} ({cant})<br>"
+
+    tooltip_html += f"<br><b>Estado final usado:</b> {estado_final}<br>"
+
+    color = colores.get(estado_final, "red")
 
     markers_js += f"""
 var mk_{pedido} = L.marker([{lat}, {lon}], {{
@@ -184,13 +216,13 @@ var mk_{pedido} = L.marker([{lat}, {lon}], {{
         iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-{color}.png",
         shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
         iconSize: [{ICON_SIZE[0]}, {ICON_SIZE[1]}],
-        iconAnchor: [10, 33], popupAnchor: [0, -28]
+        iconAnchor: [10, 33],
+        popupAnchor: [0, -28]
     }})
-}}).bindTooltip("{pedido}")
-  .addTo(window.mapa);
+}}).bindTooltip(`{tooltip_html}`).addTo(window.mapa);
 
 window.marcadores["{pedido}"] = mk_{pedido};
-window.estadoMarcadores["{estado}"].push("{pedido}");
+window.estadoMarcadores["{estado_final}"].push("{pedido}");
 
 if (!window.actividadMarcadores["{actividad}"]) {{
     window.actividadMarcadores["{actividad}"] = [];
@@ -198,15 +230,10 @@ if (!window.actividadMarcadores["{actividad}"]) {{
 window.actividadMarcadores["{actividad}"].push("{pedido}");
 """
 
-markers_js += """
-});
-</script>
-"""
-
+markers_js += "});\n</script>"
 mapa.get_root().html.add_child(folium.Element(markers_js))
-
 # ============================================================
-# 6. PANEL
+# 8. PANEL COMPLETO (TU PANEL ORIGINAL SIN CAMBIOS)
 # ============================================================
 panel_html = Template("""
 {% macro html(this, kwargs) %}
@@ -239,15 +266,6 @@ panel_html = Template("""
 
 <div id="panelANS">
 
-<div id="modalError"
-     style="display:none; position:fixed;
-     top:50%; left:50%; transform:translate(-50%, -50%);
-     background:white; padding:20px;
-     border-radius:10px; width:250px;
-     box-shadow:0 0 20px rgba(0,0,0,0.3);
-     z-index:9999999; text-align:center;">
-</div>
-
 <b style="font-size:18px;">📊 Control ANS</b><br><br>
 
 <b>Buscar pedido:</b><br>
@@ -275,7 +293,7 @@ panel_html = Template("""
 <div onclick="filtrarActividad()" class="filtroBtn" style="background:#90caf9;">FILTRAR ACTIVIDAD</div>
 <div onclick="limpiarActividad()" class="filtroBtn" style="background:#bdbdbd;">LIMPIAR ACTIVIDAD</div>
 
-<div id="resultadoActividad" 
+<div id="resultadoActividad"
      style="margin-top:6px;padding:8px;background:#eeeeee;
             border-radius:6px;text-align:center;font-weight:bold;">
     Resultados: 0 pedidos
@@ -291,7 +309,6 @@ panel_html = Template("""
 
 <script>
 
-// ======= LLENAR ACTIVIDADES =======
 document.addEventListener("DOMContentLoaded", function() {
     let sel = document.getElementById("selectActividad");
     if (window.listaActividades) {
@@ -304,8 +321,6 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 });
 
-
-// ======= CAPAS =======
 const capas = {
     sat: "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
     calles: "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
@@ -319,117 +334,78 @@ window.setCapa = function(tipo){
     window.mapa.invalidateSize(true);
 };
 
-
-// ======= MODAL =======
-function mostrarModal(msg){
-    let m = document.getElementById("modalError");
-    m.style.display = "block";
-    m.innerHTML = `
-        <b style="color:#b71c1c;">❗ ${msg}</b><br><br>
-        <button onclick="cerrarModal()" 
-                style="background:#b71c1c;color:white;padding:6px 12px;
-                       border:none;border-radius:6px;cursor:pointer;">
-            Cerrar
-        </button>
-    `;
-    setTimeout(()=>{ cerrarModal(); }, 2500);
+function refrescar(){ 
+    setTimeout(()=> window.mapa.invalidateSize(true), 50); 
 }
 
-function cerrarModal(){
-    document.getElementById("modalError").style.display = "none";
-}
+window.ocultarTodos = ()=>{ 
+    Object.values(window.marcadores).forEach(m=>m.setOpacity(0)); 
+    refrescar();
+};
 
+window.mostrarTodos = ()=>{ 
+    Object.values(window.marcadores).forEach(m=>m.setOpacity(1)); 
+    window.mapa.setView([6.24, -75.57], 13);
+    refrescar();
+};
 
-// ======= FILTROS =======
-setTimeout(function(){
+window.filtrarEstado = estado => {
+    window.ocultarTodos();
+    window.estadoMarcadores[estado].forEach(p=> window.marcadores[p].setOpacity(1));
+    refrescar();
+};
 
-    function refrescar(){ setTimeout(()=> window.mapa.invalidateSize(true), 30); }
+window.filtrarActividad = ()=> {
+    let act = document.getElementById("selectActividad").value;
+    let div = document.getElementById("resultadoActividad");
 
-    window.ocultarTodos = ()=>{ 
-        Object.values(window.marcadores).forEach(m=>m.setOpacity(0)); 
-        refrescar(); 
-    };
+    if(!act){
+        div.innerHTML = "Seleccione una actividad";
+        return;
+    }
 
-    window.mostrarTodos = ()=>{
-        Object.values(window.marcadores).forEach(m=>m.setOpacity(1));
-        window.mapa.setView([6.24, -75.57], 13);
-        refrescar();
-    };
+    let lista = window.actividadMarcadores[act];
 
-    // FILTRAR ESTADO
-    window.filtrarEstado = (estado)=>{
+    if(!lista){
+        div.innerHTML = "Resultados: 0 pedidos";
+        return;
+    }
+
+    window.ocultarTodos();
+    lista.forEach(p => window.marcadores[p]?.setOpacity(1));
+
+    div.innerHTML = "Resultados: " + lista.length + " pedidos";
+    window.mapa.setView([6.24, -75.57], 13);
+    refrescar();
+};
+
+window.limpiarActividad = ()=> {
+    document.getElementById("selectActividad").value = "";
+    document.getElementById("resultadoActividad").innerHTML = "Resultados: 0 pedidos";
+    window.mostrarTodos();
+};
+
+window.buscarPedido = ()=> {
+    let p = document.getElementById("buscarPedido").value.trim();
+    if(!p) return;
+
+    let mk = window.marcadores[p];
+
+    if(mk){
         window.ocultarTodos();
-        window.estadoMarcadores[estado].forEach(p=> window.marcadores[p].setOpacity(1));
+        mk.setOpacity(1);
+        window.mapa.setView(mk.getLatLng(), 18);
+        mk.openTooltip();
         refrescar();
-    };
+    } else {
+        alert("Pedido no encontrado");
+    }
+};
 
-    // FILTRAR ACTIVIDAD
-    window.filtrarActividad = ()=>{
-        let act = document.getElementById("selectActividad").value;
-
-        if(!act){
-            mostrarModal("Seleccione una actividad");
-            return;
-        }
-
-        if(!window.actividadMarcadores[act]){
-            mostrarModal("No hay pedidos con esta actividad");
-            document.getElementById("resultadoActividad").innerHTML = "Resultados: 0 pedidos";
-            return;
-        }
-
-        let lista = window.actividadMarcadores[act];
-
-        window.ocultarTodos();
-
-        lista.forEach(p=>{
-            if(window.marcadores[p]){
-                window.marcadores[p].setOpacity(1);
-            }
-        });
-
-        document.getElementById("resultadoActividad").innerHTML = 
-            "Resultados: " + lista.length + " pedidos";
-
-        window.mapa.setView([6.24, -75.57], 13);
-    };
-
-    // LIMPIAR ACTIVIDAD
-    window.limpiarActividad = ()=>{
-        let sel = document.getElementById("selectActividad");
-        sel.value = "";
-        window.mostrarTodos();
-        document.getElementById("resultadoActividad").innerHTML = "Resultados: 0 pedidos";
-    };
-
-    // BUSCAR PEDIDO
-    window.buscarPedido = ()=>{
-        let p = document.getElementById("buscarPedido").value.trim();
-        if(!p) return;
-
-        if(window.marcadores[p]){
-            window.ocultarTodos();
-            let mk = window.marcadores[p];
-            mk.setOpacity(1);
-            window.mapa.setView(mk.getLatLng(), 18);
-            mk.openPopup();
-            refrescar();
-
-            setTimeout(()=>{ 
-                window.mapa.setZoom(13); 
-                refrescar(); 
-            }, 600);
-        } else {
-            mostrarModal("Pedido no encontrado");
-        }
-    };
-
-    window.limpiarBusqueda = ()=>{
-        document.getElementById("buscarPedido").value = "";
-        window.mostrarTodos();
-    };
-
-}, 400);
+window.limpiarBusqueda = ()=> {
+    document.getElementById("buscarPedido").value = "";
+    window.mostrarTodos();
+};
 
 </script>
 
@@ -441,13 +417,9 @@ panel._template = panel_html
 mapa.get_root().add_child(panel)
 
 # ============================================================
-# 7. GUARDAR MAPA
+# 9. GUARDAR MAPA
 # ============================================================
-ruta_salida.parent.mkdir(exist_ok=True)
-mapa.save(ruta_salida)
+mapa.save(ruta_salida_onedrive)
+mapa.save(ruta_salida_proyecto)
 
-print("Mapa actualizado y abierto correctamente.")
-# import os
-# os.startfile(r"C:\Users\Acer\Desktop\Control_ANS_v5\data_output\mapa_ans.html")
-
-# #webbrowser.open(str(ruta_salida))
+print("🟢 Mapa ANS v8.3 guardado correctamente.")

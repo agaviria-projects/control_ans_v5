@@ -201,6 +201,16 @@ def ejecutar_informe():
                 log_text.insert(tk.END, l); log_text.see(tk.END)
             proceso3.wait()
 
+            # ---- 4) GENERAR MAPA ANS ----
+            log_text.insert(tk.END, "\n🌎 Generando Mapa ANS...\n", "info")
+            log_text.see(tk.END)
+
+            if generar_mapa():
+                log_text.insert(tk.END, "   ✔ Mapa ANS generado correctamente.\n", "success")
+            else:
+                log_text.insert(tk.END, "   ❌ Hubo un error al generar el mapa ANS.\n", "error")    
+
+
             log_text.insert(tk.END, "\n✅ Informe completado.\n", "success")
             mbox.showinfo("Control ANS", "Informe ANS generado correctamente.")
 
