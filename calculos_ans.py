@@ -329,6 +329,7 @@ try:
             "NÚMERO DEL PEDIDO": "PEDIDO",
             "ESTADO DEL PEDIDO": "REPORTE_TECNICO",
             "NOMBRE DEL TÉCNICO": "TECNICO_EJECUTA",
+            "OBSERVACIÓN": "OBSERVACION"
         }
         df_form.rename(columns=renames, inplace=True)
 
@@ -344,7 +345,7 @@ try:
             df_form["TECNICO_EJECUTA"] = df_form["TECNICO_EJECUTA"].astype(str).str.upper().str.strip()
 
         # MERGE SEGURO
-        columnas = ["PEDIDO", "REPORTE_TECNICO", "TECNICO_EJECUTA"]
+        columnas = ["PEDIDO", "REPORTE_TECNICO", "TECNICO_EJECUTA","OBSERVACION"]
         columnas = [c for c in columnas if c in df_form.columns]
 
         df = df.merge(df_form[columnas], on="PEDIDO", how="left")
@@ -352,6 +353,7 @@ try:
         # Rellenar vacíos
         df["REPORTE_TECNICO"] = df["REPORTE_TECNICO"].fillna("SIN DATO")
         df["TECNICO_EJECUTA"] = df["TECNICO_EJECUTA"].fillna("SIN DATO")
+        df["OBSERVACION"] = df["OBSERVACION"].fillna("SIN DATO")
 
         print("🔗 Cruce con Google Sheets finalizado correctamente ✔")
 
@@ -364,7 +366,7 @@ except Exception as e:
 # ============================================================
 # 🩹 CREAR COLUMNAS SI NO EXISTEN (solución definitiva)
 # ============================================================
-for columna in ["REPORTE_TECNICO", "TECNICO_EJECUTA", "ESTADO_FENIX"]:
+for columna in ["REPORTE_TECNICO", "TECNICO_EJECUTA", "ESTADO_FENIX","OBSERVACION"]:
     if columna not in df.columns:
         df[columna] = "SIN DATO"
         print(f"🆕 Columna agregada automáticamente: {columna}")
