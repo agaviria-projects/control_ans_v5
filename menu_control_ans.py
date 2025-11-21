@@ -304,7 +304,7 @@ actualizar_hora_top()
 screen_w = ventana.winfo_screenwidth()
 screen_h = ventana.winfo_screenheight()
 ancho = int(screen_w * 0.55)
-alto = int(screen_h * 0.78)
+alto = int(screen_h * 0.88)
 x = (screen_w // 2) - (ancho // 2)
 y = (screen_h // 2) - (alto // 2)
 ventana.geometry(f"{ancho}x{alto}+{x}+{y}")
@@ -464,7 +464,7 @@ barra_progreso.pack(pady=(5, 5))
 frame_log = tk.Frame(ventana, bg="#EAEDED")
 frame_log.pack(fill="both", expand=False, pady=(5, 0))
 
-log_text = scrolledtext.ScrolledText(frame_log, width=90, height=14,
+log_text = scrolledtext.ScrolledText(frame_log, width=90, height=10,
                                      bg="white", font=("Consolas", 9))
 log_text.pack(padx=15, pady=(5, 10), expand=True, fill="both")
 
@@ -490,12 +490,12 @@ aplicar_hover(btn_salir)
 # PIE DE PÁGINA
 # ------------------------------------------------------------
 frame_footer = tk.Frame(ventana, bg="#EAEDED")
-frame_footer.pack(side="bottom", fill="x", pady=(0, 5), ipady=4)
+frame_footer.pack(side="bottom", fill="x", pady=(10, 15), ipady=10)
 
-tk.Frame(frame_footer, bg="#B3B6B7", height=2).pack(fill="x", pady=(2, 3))
+tk.Frame(frame_footer, bg="#B3B6B7", height=4).pack(fill="x", pady=(5, 8))
 
 frame_pie = tk.Frame(frame_footer, bg="#EAEDED")
-frame_pie.pack(fill="x", pady=(0, 3))
+frame_pie.pack(fill="x", pady=(5, 5))
 
 pie_estado = tk.Label(frame_pie,
                       text="⚙️ Esperando acción del usuario...",
