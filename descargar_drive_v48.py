@@ -182,41 +182,89 @@ def descargar_pdfs(service, df):
             continue
 
         file_id = url.split("id=")[-1]
-        nombre_archivo = f"EPM - {pedido} - {tecnico}.pdf"
+
+        # ================================
+        # 🛡️ VALIDAR QUE EL ARCHIVO EXISTA
+        # ================================
+        try:
+            service.files().get(fileId=file_id).execute()
+        except Exception:
+             print(f"⚠️ Archivo no accesible o borrado en Google Drive → Fila {i+1}. Se omite.")
+             continue    
+        # =====================================================
+        # 🔄 NUEVO NOMBRE ESTÁNDAR: EPM-FNX-{pedido}-257-(n).pdf
+        # =====================================================
         ruta_destino = obtener_ruta_destino(actividad)
+        base_name = f"EPM-FNX-{pedido}-257"
+
+        # Buscar versiones previas: EPM-FNX-{pedido}-257-(1).pdf
+        existentes = list(ruta_destino.glob(f"{base_name}-(*).pdf"))
+        if existentes:
+            numeros = []
+            for e in existentes:
+                try:
+                    n = int(str(e.stem).split("(")[-1].replace(")", ""))
+                    numeros.append(n)
+                except:
+                    pass
+            consecutivo = max(numeros) + 1
+        else:
+            consecutivo = 1
+
+        nombre_archivo = f"{base_name}-({consecutivo}).pdf"
         ruta_local = ruta_destino / nombre_archivo
 
-        if ruta_local.exists():
-            print(f"[INFO] Ya existe: {nombre_archivo}, se omite descarga.")
-            continue
-
-        try:
-            print(f"⬇️ Descargando {nombre_archivo} en {ruta_destino} ...")
-            request = service.files().get_media(fileId=file_id)
-            with io.FileIO(ruta_local, "wb") as fh:
-                downloader = MediaIoBaseDownload(fh, request)
-                done = False
-                while not done:
-                    status, done = downloader.next_chunk()
-                    if status:
+        print(f"⬇️ Descargando {nombre_archivo} ...")
+        # =====================================================
+        # ⬇️ DESCARGA REAL DEL PDF (NO SE TOCA)
+        # =====================================================
+        request = service.files().get_media(fileId=file_id)
+        with io.FileIO(ruta_local, "wb") as fh:
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                 status, done = downloader.next_chunk()
+                 if status:
                         progreso = int(status.progress() * 100)
                         print(f"   Progreso: {progreso}%")
-            print(f"✅ Guardado en: {ruta_local}\n")
-            descargados += 1
-            time.sleep(0.8)
+        # =====================================================
+        # 📦 COMPRESIÓN SOLO SI PDF >= 20 KB → ZIP
+        # SOLO QUEDA EL ZIP (PDF SE ELIMINA)
+        # =====================================================
+        try:
+            peso_kb = ruta_local.stat().st_size / 1024
 
-        except Exception as e:
-            errores += 1
-            print(f"❌ Error al descargar {nombre_archivo}: {e}")
-            with open(log_errores, "a", encoding="utf-8") as log:
-                log.write(f"{pedido} - {tecnico}: {e}\n")
+            if peso_kb >= 20:
+                print(f"⚠️ PDF de {peso_kb:.1f} KB → demasiado pesado para ENTER.")
+                print("   📦 Comprimiendo en ZIP y eliminando PDF original...")
 
-    print("\n---------------------------------------------")
-    print(f"✅ Descargas completadas: {descargados}")
-    print(f"⚠️ Errores registrados: {errores}")
-    if errores > 0:
-        print(f"📄 Ver log: {log_errores}")
-    print("---------------------------------------------\n")
+                import zipfile
+
+                # Crear ruta final del ZIP
+                zip_path = ruta_local.with_suffix(".zip")
+
+                # Crear archivo ZIP
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    zipf.write(ruta_local, ruta_local.name)
+
+                print(f"📦 Archivo ZIP generado → {zip_path.name}")
+
+                # 🗑️ Eliminar el PDF original
+                ruta_local.unlink()
+                print(f"🗑️ PDF eliminado → {ruta_local.name}")
+
+            else:
+                print(f"👌 PDF liviano ({peso_kb:.1f} KB). No requiere compresión.")
+
+        except Exception as ce:
+            print(f"⚠️ Error al crear ZIP: {ce}")
+
+        print("\n---------------------------------------------")
+        print(f"✅ Descargas completadas: {descargados}")
+        print(f"⚠️ Errores registrados: {errores}")
+        if errores > 0:
+            print(f"📄 Ver log: {log_errores}")
+        print("---------------------------------------------\n")
 
 # ------------------------------------------------------------
 # ACTUALIZAR RUTAS EN GOOGLE SHEET
