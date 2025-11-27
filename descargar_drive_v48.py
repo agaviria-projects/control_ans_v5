@@ -1,34 +1,31 @@
 # ============================================================
-# DESCARGAR Y RENOMBRAR PDF DESDE GOOGLE SHEET - v4.12 FINAL
+# DESCARGAR Y RENOMBRAR PDF DESDE GOOGLE SHEET - v4.14 ESTABLE
 # Integración completa: Drive → OneDrive → Google Sheet
-# Versión robusta con detección de entorno (Empresa / Personal)
-# + creación automática de carpetas por responsable y actividad
+# Manejo de PDF dañados, compresión, rutas responsables,
+# carpetas automáticas y actualización en Google Sheet.
 # ============================================================
 
 import os
 import io
 import gspread
 import pandas as pd
-import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from gspread.utils import rowcol_to_a1
 from pathlib import Path
+import zipfile
 
-# ------------------------------------------------------------
+# ============================================================
 # CONFIGURACIÓN BASE
-# ------------------------------------------------------------
-#CAMBIAR LA LINEA 26 POR ESTA 24
-#CRED_PATH = r"C:\Users\hector.gaviria\Desktop\Control_ANS\control-ans-elite-f4ea102db569.json"
-
+# ============================================================
 CRED_PATH = r"C:\Users\hector.gaviria\Desktop\Control_ANS\control-ans-elite-f4ea102db569.json"
 SHEET_ID = "1bPLGVVz50k6PlNp382isJrqtW_3IsrrhGW0UUlMf-bM"
 
-# ------------------------------------------------------------
-# 🔄 DETECCIÓN AUTOMÁTICA DE ENTORNO (Empresa / Personal)
-# ------------------------------------------------------------
+# ============================================================
+# DETECCIÓN DE ENTORNO
+# ============================================================
 RUTA_EMPRESA = Path(r"C:\Users\hector.gaviria\OneDrive - Elite Ingenieros SAS\Evidencias_PDF")
 
 if RUTA_EMPRESA.exists():
@@ -38,17 +35,11 @@ else:
     RUTA_DESTINO = Path(r"C:\Users\Acer\Desktop\Evidencias_PDF")
     print("💻 Entorno detectado: Personal (modo pruebas en Desktop)")
 
-# ------------------------------------------------------------
-# 🧭 CONFIGURACIÓN DE FECHA SIN CREAR CARPETA BASE
-# ------------------------------------------------------------
-fecha_hoy = datetime.today().strftime('%Y-%m-%d')
-CARPETA_FECHA = RUTA_DESTINO  # ya no crea una carpeta por fecha
-
 print(f"📂 Carpeta destino base: {RUTA_DESTINO}")
 
-# ------------------------------------------------------------
-# AUTENTICACIÓN A GOOGLE DRIVE
-# ------------------------------------------------------------
+# ============================================================
+# AUTENTICACIÓN GOOGLE DRIVE
+# ============================================================
 def crear_servicio():
     creds = service_account.Credentials.from_service_account_file(
         CRED_PATH,
@@ -56,10 +47,9 @@ def crear_servicio():
     )
     return build("drive", "v3", credentials=creds)
 
-
-# ------------------------------------------------------------
-# CONECTAR A GOOGLE SHEET CON GSPREAD
-# ------------------------------------------------------------
+# ============================================================
+# CONECTAR GOOGLE SHEET
+# ============================================================
 def conectar_gspread():
     creds = service_account.Credentials.from_service_account_file(
         CRED_PATH, scopes=["https://www.googleapis.com/auth/spreadsheets"]
@@ -76,31 +66,35 @@ def conectar_gspread():
     print("⚠️ No se detectó hoja de respuestas; usando la primera hoja.")
     return spreadsheet.sheet1
 
-# ------------------------------------------------------------
+# ============================================================
 # LEER GOOGLE SHEET COMO CSV
-# ------------------------------------------------------------
+# ============================================================
 def leer_google_sheet(service):
     try:
         request = service.files().export_media(fileId=SHEET_ID, mimeType="text/csv")
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
+
         done = False
         while not done:
             status, done = downloader.next_chunk()
+
         fh.seek(0)
         df = pd.read_csv(fh)
         print("✅ Hoja leída correctamente.\n")
         print(df.head())
         return df
+
     except Exception as e:
         print(f"❌ Error al leer Google Sheet: {e}")
         return None
 
-# ------------------------------------------------------------
-# DESCARGAR Y RENOMBRAR PDFS POR RESPONSABLE Y ACTIVIDAD
-# ------------------------------------------------------------
+# ============================================================
+# DESCARGAR PDFS + RENOMBRAR + COMPRESIÓN
+# ============================================================
 def descargar_pdfs(service, df):
-    # Normalizar encabezados
+
+    # Normalizar columnas
     df.columns = (
         df.columns.str.strip()
         .str.lower()
@@ -112,7 +106,27 @@ def descargar_pdfs(service, df):
         .str.replace("ú", "u")
         .str.replace("ñ", "n")
     )
-    print("🧭 Encabezados normalizados:", list(df.columns))
+
+    # ============ FECHA REAL =============
+    col_fecha = next((c for c in df.columns if "marca" in c), None)
+
+    if col_fecha:
+        df[col_fecha] = pd.to_datetime(df[col_fecha], errors="coerce", dayfirst=True)
+
+
+        hoy = datetime.now().date()
+        ayer = hoy - timedelta(days=1)
+
+        fecha_form = ayer.strftime("%Y-%m-%d")
+
+        # Filtrar SOLO registros del día anterior
+        df = df[df[col_fecha].dt.date == ayer]
+
+        print(f"📌 Registros del día anterior {fecha_form}: {len(df)} encontrados.\n")
+
+    else:
+        fecha_form = datetime.now().strftime("%Y-%m-%d")
+        print("⚠️ No se detectó columna fecha. Se procesarán todos los registros.")
 
     # Columnas clave
     col_pedido = next((c for c in df.columns if "pedido" in c), None)
@@ -121,12 +135,9 @@ def descargar_pdfs(service, df):
     col_url = next((c for c in df.columns if "evidenc" in c), None)
 
     if not all([col_pedido, col_tecnico, col_actividad, col_url]):
-        print("❌ No se pudieron identificar las columnas necesarias.")
-        return
+        print("❌ Columnas clave no encontradas.")
+        return None
 
-    # ------------------------------------------------------------
-    # Mapeo de responsables por actividad (ajustado con formato real del formulario)
-    # ------------------------------------------------------------
     RESPONSABLES = {
         "ARTER-(REPLANTEO PREPAGO)": "Lina",
         "ARTER-(REPLANTEO HV)": "Lina",
@@ -134,7 +145,7 @@ def descargar_pdfs(service, df):
         "ALEGA-(LEGALIZACION RESIDENCIAL)": "Frank",
         "ALEGN-(LEGALIZACION NO RESIDENCIAL)": "Frank",
         "ALECA-(REFORMA RESIDENCIAL)": "Frank",
-        "ACAMN-(REFORMAS NO RESIDENCIAL)": "Frank",
+        "ACAMN-(REFORMAS NO RESIDENTIAL)": "Frank",
         "AEJDO-(HV SENCILLO)": "Lina",
         "INPRE-(EJECUCION PREPAGO)": "Lina",
         "AMRTR-(MOVIMIENTOS DE REDES)": "Robinson",
@@ -143,191 +154,148 @@ def descargar_pdfs(service, df):
         "DIPRE-(RETIRO PREPAGO)": "Lina"
     }
 
-    # ------------------------------------------------------------
-    # Función para obtener carpeta destino según actividad
-    # ------------------------------------------------------------
     def obtener_ruta_destino(actividad):
         responsable = RESPONSABLES.get(actividad, "Sin_Asignar")
-
-        # Si el responsable no tiene carpeta base, la crea automáticamente
         carpeta_responsable = RUTA_DESTINO / responsable
-        if not carpeta_responsable.exists():
-            carpeta_responsable.mkdir(parents=True, exist_ok=True)
-            print(f"🆕 Carpeta creada para nuevo responsable: {responsable}")
+        carpeta_responsable.mkdir(parents=True, exist_ok=True)
 
-        # Carpeta por fecha y actividad
-        ruta_final = carpeta_responsable / fecha_hoy / actividad
+        ruta_final = carpeta_responsable / fecha_form / actividad
         ruta_final.mkdir(parents=True, exist_ok=True)
         return ruta_final
 
-    log_errores = CARPETA_FECHA / "log_errores_descarga.txt"
     errores = 0
-    descargados = 0
+    total_encontrados = len(df)
+    total_descargados = 0
+    total_comprimidos = 0
+    total_sin_comprimir = 0
 
-    # ------------------------------------------------------------
-    # Proceso de descarga
-    # ------------------------------------------------------------
+
+    # ====================================================
+    # LOOP PRINCIPAL
+    # ====================================================
     for i, fila in df.iterrows():
+
         pedido = str(fila.get(col_pedido, "")).strip()
         tecnico = str(fila.get(col_tecnico, "")).strip()
         actividad = str(fila.get(col_actividad, "")).strip()
         url = str(fila.get(col_url, "")).strip()
 
-        if not (pedido and tecnico and url):
-            print(f"⚠️ Fila {i+1} incompleta, se omite.")
-            continue
+        # 🔎 DEBUG: mostrar actividad exactamente como llega desde Google Sheets
+        print(f"Actividad recibida: »{actividad}«")
 
+        if not (pedido and tecnico and url):
+            continue
         if "id=" not in url:
-            print(f"⚠️ URL inválida en la fila {i+1}: {url}")
             continue
 
         file_id = url.split("id=")[-1]
 
-        # ================================
-        # 🛡️ VALIDAR QUE EL ARCHIVO EXISTA
-        # ================================
+        # Validar existencia
         try:
             service.files().get(fileId=file_id).execute()
         except Exception:
-             print(f"⚠️ Archivo no accesible o borrado en Google Drive → Fila {i+1}. Se omite.")
-             continue    
-        # =====================================================
-        # 🔄 NUEVO NOMBRE ESTÁNDAR: EPM-FNX-{pedido}-257-(n).pdf
-        # =====================================================
+            continue
+
         ruta_destino = obtener_ruta_destino(actividad)
         base_name = f"EPM-FNX-{pedido}-257"
 
-        # Buscar versiones previas: EPM-FNX-{pedido}-257-(1).pdf
+        # Verificar consecutivos del día
         existentes = list(ruta_destino.glob(f"{base_name}-(*).pdf"))
-        if existentes:
-            numeros = []
-            for e in existentes:
-                try:
-                    n = int(str(e.stem).split("(")[-1].replace(")", ""))
-                    numeros.append(n)
-                except:
-                    pass
-            consecutivo = max(numeros) + 1
-        else:
-            consecutivo = 1
+
+        consecutivo = (
+            max([
+                int(e.stem.split("(")[-1].replace(")", ""))
+                for e in existentes
+            ]) + 1
+            if existentes else 1
+        )
 
         nombre_archivo = f"{base_name}-({consecutivo}).pdf"
         ruta_local = ruta_destino / nombre_archivo
 
         print(f"⬇️ Descargando {nombre_archivo} ...")
-        # =====================================================
-        # ⬇️ DESCARGA REAL DEL PDF (NO SE TOCA)
-        # =====================================================
-        request = service.files().get_media(fileId=file_id)
-        with io.FileIO(ruta_local, "wb") as fh:
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                 status, done = downloader.next_chunk()
-                 if status:
-                        progreso = int(status.progress() * 100)
-                        print(f"   Progreso: {progreso}%")
-        # =====================================================
-        # 📦 COMPRESIÓN SOLO SI PDF >= 20 KB → ZIP
-        # SOLO QUEDA EL ZIP (PDF SE ELIMINA)
-        # =====================================================
+
         try:
-            peso_kb = ruta_local.stat().st_size / 1024
-
-            if peso_kb >= 20:
-                print(f"⚠️ PDF de {peso_kb:.1f} KB → demasiado pesado para ENTER.")
-                print("   📦 Comprimiendo en ZIP y eliminando PDF original...")
-
-                import zipfile
-
-                # Crear ruta final del ZIP
-                zip_path = ruta_local.with_suffix(".zip")
-
-                # Crear archivo ZIP
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    zipf.write(ruta_local, ruta_local.name)
-
-                print(f"📦 Archivo ZIP generado → {zip_path.name}")
-
-                # 🗑️ Eliminar el PDF original
+            request = service.files().get_media(fileId=file_id)
+            with io.FileIO(ruta_local, "wb") as fh:
+                downloader = MediaIoBaseDownload(fh, request, chunksize=5 * 1024 * 1024)
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
+        except Exception:
+            if ruta_local.exists():
                 ruta_local.unlink()
-                print(f"🗑️ PDF eliminado → {ruta_local.name}")
+            errores += 1
+            continue
 
-            else:
-                print(f"👌 PDF liviano ({peso_kb:.1f} KB). No requiere compresión.")
+        total_descargados += 1
 
-        except Exception as ce:
-            print(f"⚠️ Error al crear ZIP: {ce}")
+        # COMPRESIÓN ≥ 20 KB
+        peso_kb = ruta_local.stat().st_size / 1024
+        if peso_kb >= 20:
+            zip_path = ruta_local.with_suffix(".zip")
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.write(ruta_local, ruta_local.name)
+            ruta_local.unlink()
+            total_comprimidos += 1  
+        else:
+            total_sin_comprimir += 1    
 
-        print("\n---------------------------------------------")
-        print(f"✅ Descargas completadas: {descargados}")
-        print(f"⚠️ Errores registrados: {errores}")
-        if errores > 0:
-            print(f"📄 Ver log: {log_errores}")
-        print("---------------------------------------------\n")
+    return fecha_form
 
-# ------------------------------------------------------------
+# ============================================================
 # ACTUALIZAR RUTAS EN GOOGLE SHEET
-# ------------------------------------------------------------
-def actualizar_rutas_locales(df):
-    print("\n🔄 Iniciando actualización de rutas en Google Sheet...")
+# ============================================================
+def actualizar_rutas_locales(df, fecha_form):
+
+    print("\n🔄 Actualizando enlaces en Google Sheet...\n")
 
     try:
         sheet = conectar_gspread()
-    except Exception as e:
-        print(f"❌ Error conectando a Google Sheet: {e}")
+    except:
         return
 
     data = sheet.get_all_records()
-    encabezados_original = sheet.row_values(1)
+    encabezados = sheet.row_values(1)
 
-    col_evidencia_index = None
-    for idx, name in enumerate(encabezados_original, start=1):
-        name_clean = str(name).strip().lower().replace(" ", "")
-        if "evidenc" in name_clean or "subeaqu" in name_clean:
-            col_evidencia_index = idx
+    col_evid = None
+    for idx, name in enumerate(encabezados, start=1):
+        if "evidenc" in name.lower().replace(" ", ""):
+            col_evid = idx
             break
 
-    if not col_evidencia_index:
-        print("❌ No se detectó la columna de evidencia.")
+    if not col_evid:
         return
-
-    total_registros = len(data)
-    enlaces_actualizados = 0
-    enlaces_no_encontrados = 0
 
     for i, fila in enumerate(data, start=2):
         pedido = str(fila.get("Número del pedido", "")).strip()
-        tecnico = str(fila.get("Nombre del técnico", "")).strip()
-        if not pedido or not tecnico:
+        if not pedido:
             continue
 
-        nombre_pdf = f"EPM - {pedido} - {tecnico}.pdf"
-        ruta_local = next(CARPETA_FECHA.glob(f"*/**/{nombre_pdf}"), None)
+        patron = f"EPM-FNX-{pedido}-257-(1).*"
+        ruta_local = next((p for p in RUTA_DESTINO.glob(f"**/{patron}")), None)
 
         if ruta_local and ruta_local.exists():
-            celda = rowcol_to_a1(i, col_evidencia_index)
+
+            celda = rowcol_to_a1(i, col_evid)
+
             ruta_web = str(ruta_local).replace(
                 r"C:\Users\hector.gaviria\OneDrive - Elite Ingenieros SAS",
                 "https://eliteingenierosas-my.sharepoint.com/personal/h_gaviria_eliteingenieros_com_co/Documents"
             ).replace("\\", "/")
-            sheet.update_acell(celda, f'=HIPERVINCULO("{ruta_web}"; "Abrir PDF")')
-            enlaces_actualizados += 1
-            print(f"✅ Enlace actualizado: {nombre_pdf}")
-        else:
-            enlaces_no_encontrados += 1
-            print(f"⚠️ No se encontró el PDF: {nombre_pdf}")
 
-    print("\n🎯 Actualización completada.")
-    print(f"✅ Enlaces correctos: {enlaces_actualizados}")
-    print(f"⚠️ No encontrados: {enlaces_no_encontrados}")
+            sheet.update_acell(celda, f'=HIPERVINCULO("{ruta_web}"; "Abrir")')
 
-# ------------------------------------------------------------
+            print(f"✔️ Enlace actualizado → {ruta_local.name}")
+
+# ============================================================
 # PROGRAMA PRINCIPAL
-# ------------------------------------------------------------
+# ============================================================
 if __name__ == "__main__":
     service = crear_servicio()
     df = leer_google_sheet(service)
+
     if df is not None:
-        descargar_pdfs(service, df)
-        actualizar_rutas_locales(df)
+        fecha_form = descargar_pdfs(service, df)
+        if fecha_form:
+            actualizar_rutas_locales(df, fecha_form)

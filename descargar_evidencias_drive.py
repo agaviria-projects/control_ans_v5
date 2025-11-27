@@ -51,6 +51,7 @@ def descargar_archivos(service):
 
     descargados = 0
     movidos = 0
+    errores = 0
 
     for file in files:
         file_id = file["id"]
@@ -60,22 +61,41 @@ def descargar_archivos(service):
         try:
             print(f"[📥] Descargando {file_name}...")
             request = service.files().get_media(fileId=file_id)
-            fh = io.FileIO(file_path, "wb")
+            
+            with io.FileIO(file_path, "wb") as fh:
+                downloader = MediaIoBaseDownload(fh, request, chunksize=5 * 1024 * 1024)
+                done = False
 
-            # ✅ Descarga más rápida con chunks grandes
-            downloader = MediaIoBaseDownload(fh, request, chunksize=1024 * 1024)  # 1 MB por bloque
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-                if status:
-                    progreso = int(status.progress() * 100)
-                    print(f"   Progreso: {progreso}%")
+            try:
+                while not done:
+                    status, done = downloader.next_chunk()
+                    if status:
+                        progreso = int(status.progress() * 100)
+                        print(f"   Progreso: {progreso}%")
+
+            except TimeoutError:
+                print(f"❌ Timeout al descargar → archivo corrupto o incompleto: {file_name}")
+                fh.close()
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                errores += 1
+                continue
+
+            except Exception as e:
+                print(f"❌ Error descargando {file_name}: {e}")
+                fh.close()
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                errores += 1
+                continue
+
+            # DESCARGA EXITOSA
             fh.close()
 
             descargados += 1
             print(f"[OK] Archivo descargado: {file_name}")
 
-            # ✅ Mover archivo al Drive/PAPELERA_API
+            # MOVER A PAPELERA_API
             file_metadata = service.files().get(fileId=file_id, fields="parents").execute()
             padres = ",".join(file_metadata.get("parents", []))
 
@@ -88,7 +108,6 @@ def descargar_archivos(service):
             movidos += 1
             print(f"[MOVIDO] Archivo movido a PAPELERA_API: {file_name}")
 
-            # ✅ Pequeña pausa para evitar límites de la API
             time.sleep(0.3)
 
         except Exception as e:
@@ -97,15 +116,13 @@ def descargar_archivos(service):
     print(f"\n✅ Total de archivos descargados: {descargados}")
     print(f"🗑️ Total de archivos movidos a PAPELERA_API: {movidos}")
 
-    # MENSAJE AUTOMÁTICO FINAL
     print("\n------------------------------------------------------------")
     print("[OK] PROCESO COMPLETADO CON ÉXITO")
-    print("[INFO] La carpeta del formulario quedó vacía.")
     print("[INFO] Los archivos se encuentran respaldados en:")
     print(f"       → {carpeta_dia}")
-    print("[INFO] Los archivos del Drive fueron movidos a la carpeta: PAPELERA_API")
-    print("[TIP]  Cuando desees liberar espacio, entra a Google Drive → PAPELERA_API y elimina definitivamente los archivos.")
+    print("[INFO] Los archivos del Drive fueron movidos a la carpeta PAPELERA_API")
     print("------------------------------------------------------------\n")
+
 
 # ============================================================
 # EJECUCIÓN
