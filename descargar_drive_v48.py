@@ -1,10 +1,3 @@
-# ============================================================
-# DESCARGAR Y RENOMBRAR PDF DESDE GOOGLE SHEET - v4.14 ESTABLE
-# Integración completa: Drive → OneDrive → Google Sheet
-# Manejo de PDF dañados, compresión, rutas responsables,
-# carpetas automáticas y actualización en Google Sheet.
-# ============================================================
-
 import os
 import io
 import gspread
@@ -46,7 +39,6 @@ def crear_servicio():
         scopes=["https://www.googleapis.com/auth/drive"]
     )
     return build("drive", "v3", credentials=creds)
-
 # ============================================================
 # CONECTAR GOOGLE SHEET
 # ============================================================
@@ -111,19 +103,18 @@ def descargar_pdfs(service, df):
     col_fecha = next((c for c in df.columns if "marca" in c), None)
 
     if col_fecha:
+        # Tomar fecha real desde la Marca Temporal
         df[col_fecha] = pd.to_datetime(df[col_fecha], errors="coerce", dayfirst=True)
+        df = df.dropna(subset=[col_fecha])
 
-
-        hoy = datetime.now().date()
-        ayer = hoy - timedelta(days=1)
-
-        fecha_form = ayer.strftime("%Y-%m-%d")
-
-        # Filtrar SOLO registros del día anterior
-        df = df[df[col_fecha].dt.date == ayer]
-
-        print(f"📌 Registros del día anterior {fecha_form}: {len(df)} encontrados.\n")
-
+        # Extraer fecha real del formulario
+        df["fecha_real"] = df[col_fecha].dt.strftime("%Y-%m-%d")
+        print("📌 Registros encontrados:", len(df), "\n")
+        
+        # 🔥 Solo descargas del día
+        fecha_mas_reciente = df["fecha_real"].max()
+        df = df[df["fecha_real"] == fecha_mas_reciente]
+        print(f"📌 Filtrando solo registros del día: {fecha_mas_reciente} → {len(df)} registros")
     else:
         fecha_form = datetime.now().strftime("%Y-%m-%d")
         print("⚠️ No se detectó columna fecha. Se procesarán todos los registros.")
@@ -145,7 +136,7 @@ def descargar_pdfs(service, df):
         "ALEGA-(LEGALIZACION RESIDENCIAL)": "Frank",
         "ALEGN-(LEGALIZACION NO RESIDENCIAL)": "Frank",
         "ALECA-(REFORMA RESIDENCIAL)": "Frank",
-        "ACAMN-(REFORMAS NO RESIDENTIAL)": "Frank",
+        "ACAMN-(REFORMA NO RESIDENCIAL)": "Frank",
         "AEJDO-(HV SENCILLO)": "Lina",
         "INPRE-(EJECUCION PREPAGO)": "Lina",
         "AMRTR-(MOVIMIENTOS DE REDES)": "Robinson",
@@ -153,15 +144,15 @@ def descargar_pdfs(service, df):
         "REEQU-(TRABAJOS PREPAGO)": "Lina",
         "DIPRE-(RETIRO PREPAGO)": "Lina"
     }
-
-    def obtener_ruta_destino(actividad):
+    def obtener_ruta_destino(actividad, fecha_real):
         responsable = RESPONSABLES.get(actividad, "Sin_Asignar")
         carpeta_responsable = RUTA_DESTINO / responsable
         carpeta_responsable.mkdir(parents=True, exist_ok=True)
 
-        ruta_final = carpeta_responsable / fecha_form / actividad
+        ruta_final = carpeta_responsable / fecha_real / actividad
         ruta_final.mkdir(parents=True, exist_ok=True)
         return ruta_final
+
 
     errores = 0
     total_encontrados = len(df)
@@ -196,7 +187,7 @@ def descargar_pdfs(service, df):
         except Exception:
             continue
 
-        ruta_destino = obtener_ruta_destino(actividad)
+        ruta_destino = obtener_ruta_destino(actividad, fila["fecha_real"])
         base_name = f"EPM-FNX-{pedido}-257"
 
         # Verificar consecutivos del día
@@ -215,17 +206,39 @@ def descargar_pdfs(service, df):
 
         print(f"⬇️ Descargando {nombre_archivo} ...")
 
-        try:
-            request = service.files().get_media(fileId=file_id)
-            with io.FileIO(ruta_local, "wb") as fh:
-                downloader = MediaIoBaseDownload(fh, request, chunksize=5 * 1024 * 1024)
-                done = False
-                while not done:
-                    status, done = downloader.next_chunk()
-        except Exception:
-            if ruta_local.exists():
-                ruta_local.unlink()
+        # Si el archivo ya existe, saltarlo (ahorra mucho tiempo)
+        if ruta_local.exists():
+            print(f"⏩ Ya existe → {ruta_local.name} (se omite)")
+            total_sin_comprimir += 1
+            continue
+
+        # Intentos con chunk optimizado
+        exitoso = False
+        for intento in range(1, 4):
+            try:
+                request = service.files().get_media(fileId=file_id)
+
+                # chunksize reducido → más estable
+                with io.FileIO(ruta_local, "wb") as fh:
+                    downloader = MediaIoBaseDownload(fh, request, chunksize=512 * 1024)
+                    done = False
+
+                    while not done:
+                        status, done = downloader.next_chunk()
+
+                exitoso = True
+                break
+
+            except Exception as e:
+                print(f"⚠️ Error descargando (intentó {intento}/3): {e}")
+                if ruta_local.exists():
+                    ruta_local.unlink()
+                if intento < 3:
+                  time.sleep(1)  # pequeño respiro antes del reintento 
+
+        if not exitoso:
             errores += 1
+            print("❌ Falló descarga definitiva, se omite.\n")
             continue
 
         total_descargados += 1
@@ -241,7 +254,7 @@ def descargar_pdfs(service, df):
         else:
             total_sin_comprimir += 1    
 
-    return fecha_form
+    return df["fecha_real"].iloc[-1]
 
 # ============================================================
 # ACTUALIZAR RUTAS EN GOOGLE SHEET
