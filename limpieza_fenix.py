@@ -123,6 +123,78 @@ for col in columnas_a_limpieza:
             .str.strip()
         )
 # ------------------------------------------------------------
+# CLASIFICACIÓN TIPO_DIRECCION SEGÚN PREFIJO NUMÉRICO (VERSIÓN FINAL BLINDADA)
+# ------------------------------------------------------------
+prefijos_urbanos = ("116", "136", "103", "114", "117", "119", "163", "140", "159", "167")
+
+def clasificar_tipo_direccion(direccion, tipo_original):
+    """
+    - direccion: valor original de Fénix
+    - tipo_original: clasificación que trae Fénix
+    """
+
+    if pd.isna(direccion) or direccion.strip() == "":
+        return tipo_original
+
+    valor = str(direccion).strip().upper()
+
+    # --------------------------------------------------------
+    # 1) NO MODIFICAR DIRECCIONES REALES (CR, CL, CALLE, AV...)
+    # --------------------------------------------------------
+    patrones_calle = (
+        "CR ", "CL ", "CRA ", "CALLE", "CARRERA", "AV ", "AV.", 
+        "TRANS", "TV ", "DG ", "DIAGONAL", "AUTOPISTA"
+    )
+    if valor.startswith(patrones_calle):
+        return tipo_original
+
+    # --------------------------------------------------------
+    # 2) ELIMINAR NÚMEROS DENTRO DE PARÉNTESIS
+    #    EJ: (INTERIOR 114) → se elimina
+    # --------------------------------------------------------
+    import re
+    valor_sin_parentesis = re.sub(r"\(.*?\)", "", valor).strip()
+
+    # --------------------------------------------------------
+    # 3) EXTRAER SOLO LO NUMÉRICO CUANDO SEA CÓDIGO
+    # --------------------------------------------------------
+    parte_numerica = ''.join([c for c in valor_sin_parentesis if c.isdigit()])
+
+    # Si no hay parte numérica válida → dejar tipo original
+    if not parte_numerica:
+        return tipo_original
+
+    # Si la parte numérica es corta (ej. 114, 522, 301) → dirección real
+    if len(parte_numerica) < 6:  
+        return tipo_original
+
+    # --------------------------------------------------------
+    # 4) PREFIJOS URBANOS → URBANO
+    # --------------------------------------------------------
+    for pre in prefijos_urbanos:
+        if parte_numerica.startswith(pre):
+            return "Urbano"
+
+    # --------------------------------------------------------
+    # 5) SI TIENE LA PALABRA RURAL → RURAL
+    # --------------------------------------------------------
+    if "RURAL" in valor:
+        return "Rural"
+
+    # 6) Si tiene “URB” → URBANO
+    if "URB" in valor:
+        return "Urbano"
+
+    # 7) Dejar tipo original si nada coincide
+    return tipo_original
+
+
+# Aplicación de la función
+df["TIPO_DIRECCION"] = df.apply(
+    lambda fila: clasificar_tipo_direccion(fila["DIRECCION"], fila["TIPO_DIRECCION"]),
+    axis=1
+)
+# ------------------------------------------------------------
 # 🔧 NORMALIZACIÓN DE FECHAS (detección dual ISO / Latino)
 # ------------------------------------------------------------
 columnas_fecha = [
