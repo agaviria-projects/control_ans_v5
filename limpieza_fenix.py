@@ -108,6 +108,27 @@ actividades_validas = [
     "ARTER", "AEJDO"
 ]
 df = df[df["ACTIVIDAD"].isin(actividades_validas)]
+# ------------------------------------------------------------
+# FILTRO DE ACTIVIDADES
+# ------------------------------------------------------------
+actividades_validas = [
+    "ACREV", "ALEGN", "ALEGA", "ALECA", "ALEMN", "ACAMN",
+    "AMRTR", "APLIN", "REEQU", "INPRE", "DIPRE",
+    "ARTER", "AEJDO"
+]
+df = df[df["ACTIVIDAD"].isin(actividades_validas)]
+
+# ------------------------------------------------------------
+# FILTRO DE NOMBRES PROHIBIDOS
+# ------------------------------------------------------------
+nombres_excluir = [
+    "MET Rev-Inst-Concentra E_CR014",
+    "Revisor Inst. Particulares Metrosur",
+    # Agregar otros si aparecen
+]
+
+df = df[~df["NOMBRE"].isin(nombres_excluir)]
+print("🧹 Filtro de nombres aplicado. Registros depurados.")
 
 # ------------------------------------------------------------
 # LIMPIEZA DE TEXTO Y COMILLAS
