@@ -15,6 +15,7 @@ from PIL import Image, ImageTk
 import sys
 import io
 from datetime import datetime
+from modules.calendario_ans import abrir_calendario
 
 # ------------------------------------------------------------
 # CONFIGURACIÓN UTF-8 GLOBAL
@@ -508,6 +509,29 @@ pie_corporativo = tk.Label(frame_pie,
     font=("Segoe UI", 9, "italic"), fg="#1B263B", bg="#EAEDED")
 pie_corporativo.pack(side="right", padx=(0, 15))
 
+# ------------------------------------------------------------
+# ICONO PEQUEÑO DEL CALENDARIO  
+# ------------------------------------------------------------
+try:
+    icono_cal_img = Image.open(BASE_DIR / "assets" / "calendario.png")
+    icono_cal_img = icono_cal_img.resize((42, 42), Image.Resampling.LANCZOS)
+    icono_cal = ImageTk.PhotoImage(icono_cal_img)
+
+    lbl_calendario = tk.Label(
+        ventana,
+        image=icono_cal,
+        bg="#EAEDED",
+        cursor="hand2"
+    )
+    lbl_calendario.image = icono_cal
+
+    # esquina inferior derecha
+    lbl_calendario.place(relx=0.45, rely=0.90)
+
+    lbl_calendario.bind("<Button-1>", lambda e: abrir_calendario())
+
+except Exception as e:
+    print("⚠ Error cargando icono calendario:", e)
 # ------------------------------------------------------------
 # INICIAR INTERFAZ
 # ------------------------------------------------------------
