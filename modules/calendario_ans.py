@@ -35,7 +35,7 @@ FESTIVOS = {
 # ===============================
 def abrir_calendario():
     win = tk.Toplevel()
-    win.title("Calendario ANS")
+    win.title("Calendario ANS - Elite Ingenieros")
     win.geometry("360x250")
     win.resizable(False, False)
     win.configure(bg="#FFFFFF")
